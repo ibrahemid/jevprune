@@ -33,7 +33,7 @@ describe("runCommand", () => {
   it("passes the child's exit code through and captures stdout", async () => {
     const capture = await run("process.stdout.write('one\\ntwo\\n'); process.exit(3);");
     expect(capture.exitCode).toBe(3);
-    expect(capture.text).toBe("one\ntwo\n");
+    expect(capture.captured.toString("utf8")).toBe("one\ntwo\n");
     expect(capture.lines).toBe(2);
     expect(capture.bytes).toBe(8);
     expect(capture.interrupted).toBe(false);
@@ -44,9 +44,9 @@ describe("runCommand", () => {
     const capture = await run(
       "process.stdout.write('out\\n'); process.stderr.write('err\\n'); setTimeout(() => process.stdout.write('late\\n'), 30);",
     );
-    expect(capture.text).toContain("out\n");
-    expect(capture.text).toContain("err\n");
-    expect(capture.text).toContain("late\n");
+    expect(capture.captured.toString("utf8")).toContain("out\n");
+    expect(capture.captured.toString("utf8")).toContain("err\n");
+    expect(capture.captured.toString("utf8")).toContain("late\n");
     expect(capture.lines).toBe(3);
   });
 
@@ -59,7 +59,7 @@ describe("runCommand", () => {
       maxPruneBytes: 1_048_576,
     });
     expect((await stat(store.logPath(id))).mode & 0o777).toBe(0o600);
-    expect(await readFile(store.logPath(id), "utf8")).toBe(capture.text);
+    expect(await readFile(store.logPath(id), "utf8")).toBe(capture.captured.toString("utf8"));
     expect(capture.storeFailure).toBeUndefined();
   });
 
@@ -95,9 +95,9 @@ describe("runCommand", () => {
 
   it("counts lines exactly when a terminator is split across chunks", async () => {
     const capture = await run("process.stdout.write('a\\r'); setTimeout(() => process.stdout.write('\\nb'), 40);");
-    expect(capture.text).toBe("a\r\nb");
+    expect(capture.captured.toString("utf8")).toBe("a\r\nb");
     expect(capture.lines).toBe(2);
-    expect(capture.lines).toBe(splitLines(capture.text).length);
+    expect(capture.lines).toBe(splitLines(capture.captured.toString("utf8")).length);
   });
 
   it("counts lone carriage returns and unterminated last lines", async () => {
@@ -107,7 +107,7 @@ describe("runCommand", () => {
       ["process.stdout.write('');", ""],
     ] as const) {
       const capture = await run(script);
-      expect(capture.text).toBe(text);
+      expect(capture.captured.toString("utf8")).toBe(text);
       expect(capture.lines).toBe(splitLines(text).length);
     }
   });
@@ -120,8 +120,8 @@ describe("runCommand", () => {
     expect(capture.bytes).toBe(41_943_040);
     expect(capture.lines).toBe(40_960);
     expect(capture.oversize).toBe(true);
-    expect(Buffer.byteLength(capture.text)).toBeLessThanOrEqual(262_144 + 256 * 1024);
-    for (const line of splitLines(capture.text)) {
+    expect(capture.captured.length).toBeLessThanOrEqual(262_144 + 256 * 1024);
+    for (const line of splitLines(capture.captured.toString("utf8"))) {
       expect(line.text === "" || line.text === "x".repeat(1023)).toBe(true);
     }
   });
@@ -165,7 +165,7 @@ describe("runCommand", () => {
       store: broken,
       maxPruneBytes: 1_048_576,
     });
-    expect(capture.text).toBe("still here\n");
+    expect(capture.captured.toString("utf8")).toBe("still here\n");
     expect(capture.exitCode).toBe(0);
     expect(capture.storeFailure?.code).toBe("ENOTDIR");
   });
@@ -177,6 +177,6 @@ describe("runCommand", () => {
       store: null,
       maxPruneBytes: 1_048_576,
     });
-    expect(capture.text).toBe("no store\n");
+    expect(capture.captured.toString("utf8")).toBe("no store\n");
   });
 });

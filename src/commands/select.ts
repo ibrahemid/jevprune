@@ -1,10 +1,14 @@
 import { readFile } from "node:fs/promises";
 
+import { countByteLines, isValidUtf8 } from "../bytes.js";
+import { loadConfig } from "../config.js";
 import { errorMessage } from "../errors.js";
-import { withFooter } from "../footer.js";
+import { footerAfter, withFooter } from "../footer.js";
 import type { CliIo } from "../io.js";
-import { readStream } from "../io.js";
-import { pruneOutput } from "../prune.js";
+import { readStreamBytes } from "../io.js";
+import { pruneOutput, recordRun } from "../prune.js";
+import { NOT_UTF8_NOTE, NOT_UTF8_REASON, passthroughSelection } from "../select.js";
+import { RunStore, newRunId } from "../store.js";
 import { resolveTask } from "../task.js";
 
 export interface SelectOptions {
@@ -14,10 +18,17 @@ export interface SelectOptions {
   readonly command?: string | undefined;
 }
 
+interface PassThroughInput {
+  readonly bytes: Buffer;
+  readonly task: string;
+  readonly command: string;
+  readonly env: NodeJS.ProcessEnv;
+}
+
 export async function runSelect(options: SelectOptions, io: CliIo): Promise<number> {
-  let text: string;
+  let input: Buffer;
   try {
-    text = options.file !== undefined ? await readFile(options.file, "utf8") : await readStream(io.stdin);
+    input = options.file !== undefined ? await readFile(options.file) : await readStreamBytes(io.stdin);
   } catch (error) {
     await io.writeError(`jevprune: input could not be read: ${errorMessage(error)}\n`);
     return 1;
@@ -29,8 +40,13 @@ export async function runSelect(options: SelectOptions, io: CliIo): Promise<numb
     env: io.env,
     command,
   });
+
+  if (!isValidUtf8(input)) {
+    return await passThrough({ bytes: input, task, command, env: io.env }, io);
+  }
+
   const result = await pruneOutput({
-    text,
+    text: input.toString("utf8"),
     task,
     command,
     exitCode: null,
@@ -38,5 +54,33 @@ export async function runSelect(options: SelectOptions, io: CliIo): Promise<numb
     ...(options.threshold !== undefined ? { config: { threshold: options.threshold } } : {}),
   });
   await io.write(withFooter(result.kept, result.footer));
+  return 0;
+}
+
+async function passThrough(input: PassThroughInput, io: CliIo): Promise<number> {
+  const config = await loadConfig(input.env);
+  const store = new RunStore({ home: config.home, retention: config.retention });
+  const lines = countByteLines(input.bytes);
+  const startedAt = new Date().toISOString();
+  const { footer } = await recordRun({
+    store,
+    selection: passthroughSelection({ bytes: input.bytes.length, lines, reason: NOT_UTF8_REASON }),
+    logBytes: input.bytes,
+    passthroughNote: NOT_UTF8_NOTE,
+    meta: {
+      id: newRunId(),
+      command: input.command,
+      argv: [],
+      startedAt,
+      endedAt: new Date().toISOString(),
+      exitCode: null,
+      signal: null,
+      bytes: input.bytes.length,
+      lines,
+      task: input.task,
+    },
+  });
+  await io.writeBytes(input.bytes);
+  await io.write(footerAfter(input.bytes.at(-1), footer));
   return 0;
 }

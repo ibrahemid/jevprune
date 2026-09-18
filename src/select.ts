@@ -23,6 +23,10 @@ export interface OversizeCapture {
 
 export const UNAUTHORIZED_REASON = "unauthorized (401)";
 
+export const NOT_UTF8_REASON = "not valid UTF-8";
+
+export const NOT_UTF8_NOTE = "output is not valid UTF-8";
+
 export const RUBRIC =
   "A line is needed when a developer acting on the task would want to read it: errors, failures, assertions, stack frames, diagnostics, timings or statuses that bear on the task, and the lines that give them meaning. Progress bars, download counters, repeated banners, unchanged status lines and routine success noise are not needed.";
 
@@ -39,6 +43,12 @@ export interface SelectInput {
   readonly config: ResolvedConfig;
   readonly runId: string;
   readonly signal?: AbortSignal;
+}
+
+export interface PassthroughInput {
+  readonly bytes: number;
+  readonly lines: number;
+  readonly reason?: string;
 }
 
 export interface SelectionResult {
@@ -85,6 +95,23 @@ interface JevVerdicts {
   readonly jevInputTokens: number;
   readonly answers: Map<number, number>;
   readonly oversize: readonly number[];
+}
+
+export function passthroughSelection(input: PassthroughInput): SelectionResult {
+  return {
+    mode: "passthrough",
+    kept: "",
+    dropped: [],
+    linesIn: input.lines,
+    linesOut: input.lines,
+    bytesIn: input.bytes,
+    bytesOut: input.bytes,
+    windows: 0,
+    jevRequests: 0,
+    jevInputTokens: 0,
+    ...(input.reason !== undefined ? { fallbackReason: input.reason } : {}),
+    decisions: new Map(),
+  };
 }
 
 export function questionFor(n: number): string {

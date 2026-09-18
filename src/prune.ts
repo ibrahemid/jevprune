@@ -45,6 +45,8 @@ export interface RecordRunInput {
   readonly selection: SelectionResult;
   readonly meta: RunMetaBase;
   readonly logText?: string;
+  readonly logBytes?: Buffer;
+  readonly passthroughNote?: string;
   readonly storeFailureCode?: string;
 }
 
@@ -112,14 +114,15 @@ export async function pruneStream(input: PruneStreamInput): Promise<PruneResult>
 export async function recordRun(input: RecordRunInput): Promise<RecordRunResult> {
   const { store, selection, meta } = input;
   const fastPath = selection.mode === "fast-path";
+  const log = input.logBytes ?? (input.logText !== undefined ? Buffer.from(input.logText, "utf8") : undefined);
   let failureCode = input.storeFailureCode;
 
   if (store !== null && failureCode === undefined) {
     try {
       if (fastPath) {
-        if (input.logText === undefined) await store.discardRun(meta.id);
+        if (log === undefined) await store.discardRun(meta.id);
       } else {
-        if (input.logText !== undefined) await writeLog(store, meta.id, input.logText);
+        if (log !== undefined) await writeLog(store, meta.id, log);
         await store.finalizeRun(meta.id, {
           ...meta,
           mode: selection.mode,
@@ -135,6 +138,7 @@ export async function recordRun(input: RecordRunInput): Promise<RecordRunResult>
         linesOut: selection.linesOut,
         bytesIn: selection.bytesIn,
         bytesOut: selection.bytesOut,
+        ...(selection.fallbackReason !== undefined ? { reason: selection.fallbackReason } : {}),
       });
       await store.enforceRetention();
     } catch (error) {
@@ -150,6 +154,7 @@ export async function recordRun(input: RecordRunInput): Promise<RecordRunResult>
     linesOut: selection.linesOut,
     exitCode: meta.exitCode,
     ...(selection.fallbackReason !== undefined ? { fallbackReason: selection.fallbackReason } : {}),
+    ...(input.passthroughNote !== undefined ? { passthroughNote: input.passthroughNote } : {}),
     ...(failureCode !== undefined ? { storeFailureCode: failureCode } : {}),
     ...(logPath !== undefined ? { logPath } : {}),
   });
@@ -174,9 +179,9 @@ export function mergeConfig(base: ResolvedConfig, overrides: Partial<Config> | u
   return { ...base, ...defined };
 }
 
-async function writeLog(store: RunStore, id: string, text: string): Promise<void> {
+async function writeLog(store: RunStore, id: string, bytes: Buffer): Promise<void> {
   const writer = await store.openRun({ id });
-  writer.write(Buffer.from(text, "utf8"));
+  writer.write(bytes);
   await writer.close();
   if (writer.failure !== undefined) throw writer.failure;
 }

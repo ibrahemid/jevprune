@@ -294,6 +294,48 @@ describe("cli run", () => {
     expect(io.out()).toContain("boom\n");
   });
 
+
+  it("passes output that is not valid UTF-8 through byte for byte", async () => {
+    const raw = Buffer.from([0x61, 0xff, 0x0a]);
+    const io = testIo(homeEnv(home));
+    const script = "process.stdout.write(Buffer.from([0x61, 0xff, 0x0a]));";
+    expect(await runCli(["run", "--task", "read the output", "--", ...node(script)], io)).toBe(0);
+
+    const [id] = await runIds();
+    expect(id).toBeDefined();
+    const printed = io.outBytes();
+    expect(printed.subarray(0, raw.length)).toEqual(raw);
+    expect(printed.subarray(raw.length).toString("utf8")).toBe(
+      `jevprune: exit 0, 1 lines passed through (output is not valid UTF-8), full output ${join(home, "runs", `${String(id)}.log`)}\n`,
+    );
+
+    const store = new RunStore({ home });
+    expect(await store.readRunBytes(String(id))).toEqual(raw);
+    const record = await store.readRun(String(id));
+    expect(record.meta?.mode).toBe("passthrough");
+    expect(record.meta?.fallbackReason).toBe("not valid UTF-8");
+    expect(await store.readGain()).toMatchObject({ runs: 1, linesIn: 1, linesOut: 1 });
+  });
+
+  it("prunes valid multibyte output and prints those characters exactly", async () => {
+    await writeConfig(home, { fastPathLines: 0, headLines: 2, tailLines: 2, contextLines: 0 });
+    const io = testIo(homeEnv(home));
+    const script = "for (let i = 1; i <= 40; i += 1) process.stdout.write('\u2713 \u276f \ud83d\ude80 line ' + i + '\\n');";
+    expect(await runCli(["run", "--task", "read the output", "--", ...node(script)], io)).toBe(0);
+
+    const [id] = await runIds();
+    const head = Buffer.from("\u2713 \u276f \ud83d\ude80 line 1\n\u2713 \u276f \ud83d\ude80 line 2\n", "utf8");
+    const printed = io.outBytes();
+    expect(printed.subarray(0, head.length)).toEqual(head);
+    expect(printed.includes(Buffer.from("\u2713 \u276f \ud83d\ude80 line 40\n", "utf8"))).toBe(true);
+    expect(io.out()).toContain("jevprune: fallback (no Jev: no api key), 40 \u2192 ");
+
+    let expected = "";
+    for (let i = 1; i <= 40; i += 1) expected += `\u2713 \u276f \ud83d\ude80 line ${String(i)}\n`;
+    expect(await new RunStore({ home }).readRunBytes(String(id))).toEqual(Buffer.from(expected, "utf8"));
+  });
+
+
   it("reports a missing executable with exit 127", async () => {
     const io = testIo(homeEnv(home));
     expect(await runCli(["run", "--", join(home, "missing-binary")], io)).toBe(127);
@@ -369,6 +411,24 @@ describe("cli show", () => {
     expect(inverted.err()).toBe('jevprune: --lines must be a range with 1 <= A <= B, got "3-2"\n');
   });
 
+
+  it("prints a line range of a run that is not valid UTF-8 byte for byte", async () => {
+    const raw = Buffer.from([0x61, 0x0a, 0xff, 0x0a, 0x62, 0x0a]);
+    const io = testIo(homeEnv(home));
+    const script = "process.stdout.write(Buffer.from([0x61, 0x0a, 0xff, 0x0a, 0x62, 0x0a]));";
+    expect(await runCli(["run", "--task", "read the output", "--", ...node(script)], io)).toBe(0);
+    const [id] = await runIds();
+
+    const shown = testIo(homeEnv(home));
+    expect(await runCli(["show", String(id), "--lines", "2-2"], shown)).toBe(0);
+    expect(shown.outBytes()).toEqual(raw.subarray(2, 4));
+
+    const whole = testIo(homeEnv(home));
+    expect(await runCli(["show", String(id)], whole)).toBe(0);
+    expect(whole.outBytes()).toEqual(raw);
+  });
+
+
   it("rejects a missing id and a second id with exit 2", async () => {
     const missing = testIo(homeEnv(home));
     expect(await runCli(["show"], missing)).toBe(2);
@@ -443,6 +503,36 @@ describe("cli select", () => {
     expect(await runCli(["select"], io)).toBe(0);
     expect(io.out()).toContain("from stdin\n");
   });
+
+
+  it("passes a file that is not valid UTF-8 through byte for byte", async () => {
+    const raw = Buffer.from([0x61, 0x0a, 0xff, 0x0a]);
+    const path = join(home, "input.bin");
+    await writeFile(path, raw);
+    const io = testIo(homeEnv(home));
+    expect(await runCli(["select", "--task", "read it", "--file", path], io)).toBe(0);
+
+    const [id] = await runIds();
+    const printed = io.outBytes();
+    expect(printed.subarray(0, raw.length)).toEqual(raw);
+    expect(printed.subarray(raw.length).toString("utf8")).toBe(
+      `jevprune: 2 lines passed through (output is not valid UTF-8), full output ${join(home, "runs", `${String(id)}.log`)}\n`,
+    );
+    expect(await readFile(join(home, "runs", `${String(id)}.log`))).toEqual(raw);
+
+    const record = await new RunStore({ home }).readRun(String(id));
+    expect(record.meta?.mode).toBe("passthrough");
+    expect(record.meta?.fallbackReason).toBe("not valid UTF-8");
+  });
+
+  it("passes stdin that is not valid UTF-8 through byte for byte", async () => {
+    const raw = Buffer.from([0xff, 0xfe, 0x0a]);
+    const io = testIo(homeEnv(home), raw);
+    expect(await runCli(["select"], io)).toBe(0);
+    expect(io.outBytes().subarray(0, raw.length)).toEqual(raw);
+    expect(io.out()).toContain("lines passed through (output is not valid UTF-8)");
+  });
+
 
   it("exits 1 when the input cannot be read", async () => {
     const io = testIo(homeEnv(home));

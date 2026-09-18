@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { finished } from "node:stream/promises";
 import type { Writable } from "node:stream";
 
+import { byteLineStarts } from "./bytes.js";
 import { DEFAULT_CONFIG } from "./config.js";
 import type { RetentionConfig } from "./config.js";
 import { LineRangeError, RunNotFoundError, RunStoreError, errorCode, errorMessage } from "./errors.js";
-import { joinLines, splitLines } from "./lines.js";
 import type { SelectionMode } from "./types.js";
 
 export const RUN_ID_PATTERN = /^[a-z0-9]+-[a-f0-9]{4}$/;
@@ -42,6 +42,7 @@ export interface GainEntry {
   readonly linesOut: number;
   readonly bytesIn: number;
   readonly bytesOut: number;
+  readonly reason?: string;
 }
 
 export interface GainTotals {
@@ -185,31 +186,39 @@ export class RunStore {
     }
   }
 
-  async readRun(id: string): Promise<RunRecord> {
+  async readRunBytes(id: string): Promise<Buffer> {
     const path = this.logPath(id);
-    let text: string;
     try {
-      text = await readFile(path, "utf8");
+      return await readFile(path);
     } catch (error) {
       if (errorCode(error) === "ENOENT") throw new RunNotFoundError(id, { cause: error });
       throw storeError(`run log ${path} could not be read`, error);
     }
-    return { id, path, text, meta: await this.#readMeta(id) };
   }
 
-  async readRunLines(id: string, from = 1, to?: number): Promise<string> {
-    const record = await this.readRun(id);
-    const lines = splitLines(record.text);
-    const last = to ?? lines.length;
+  async readRun(id: string): Promise<RunRecord> {
+    const bytes = await this.readRunBytes(id);
+    return { id, path: this.logPath(id), text: bytes.toString("utf8"), meta: await this.#readMeta(id) };
+  }
+
+  async readRunLineBytes(id: string, from = 1, to?: number): Promise<Buffer> {
+    const bytes = await this.readRunBytes(id);
+    const starts = byteLineStarts(bytes);
+    const lines = starts.length - 1;
+    const last = to ?? lines;
     if (!Number.isInteger(from) || !Number.isInteger(last) || from < 1 || last < from) {
       throw new LineRangeError(`line range ${String(from)}-${String(last)} is not a range`);
     }
-    if (last > lines.length) {
+    if (last > lines) {
       throw new LineRangeError(
-        `line range ${String(from)}-${String(last)} is outside run ${id} (${String(lines.length)} lines)`,
+        `line range ${String(from)}-${String(last)} is outside run ${id} (${String(lines)} lines)`,
       );
     }
-    return joinLines(lines.slice(from - 1, last));
+    return bytes.subarray(starts[from - 1] ?? 0, starts[last] ?? bytes.length);
+  }
+
+  async readRunLines(id: string, from = 1, to?: number): Promise<string> {
+    return (await this.readRunLineBytes(id, from, to)).toString("utf8");
   }
 
   async appendGain(entry: GainEntry): Promise<void> {

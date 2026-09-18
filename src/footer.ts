@@ -3,6 +3,8 @@ import { sep } from "node:path";
 
 import type { SelectionMode } from "./types.js";
 
+const LF = 0x0a;
+
 export interface FooterInput {
   readonly mode: SelectionMode;
   readonly linesIn: number;
@@ -10,6 +12,7 @@ export interface FooterInput {
   readonly exitCode?: number | null;
   readonly logPath?: string;
   readonly fallbackReason?: string;
+  readonly passthroughNote?: string;
   readonly storeFailureCode?: string;
   readonly home?: string;
 }
@@ -19,7 +22,8 @@ export function formatFooter(input: FooterInput): string {
   const parts: string[] = [];
   if (input.mode === "passthrough") {
     if (input.exitCode !== undefined && input.exitCode !== null) parts.push(`exit ${String(input.exitCode)}`);
-    parts.push(`${formatCount(input.linesIn)} lines passed through`);
+    const note = input.passthroughNote === undefined ? "" : ` (${input.passthroughNote})`;
+    parts.push(`${formatCount(input.linesIn)} lines passed through${note}`);
   } else {
     if (input.mode === "fallback") parts.push(`fallback (no Jev: ${input.fallbackReason ?? "unknown"})`);
     parts.push(`${formatCount(input.linesIn)} → ${formatCount(input.linesOut)} lines`);
@@ -31,6 +35,12 @@ export function formatFooter(input: FooterInput): string {
     parts.push(`full output ${displayPath(input.logPath, input.home)}`);
   }
   return `jevprune: ${parts.join(", ")}`;
+}
+
+export function footerAfter(lastByte: number | undefined, footer: string): string {
+  if (footer.length === 0) return "";
+  const separator = lastByte === undefined || lastByte === LF ? "" : "\n";
+  return `${separator}${footer}\n`;
 }
 
 export function withFooter(kept: string, footer: string): string {

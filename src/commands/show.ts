@@ -30,11 +30,10 @@ export async function runShow(options: ShowOptions, io: CliIo): Promise<number> 
   const config = await loadConfig(io.env);
   const store = new RunStore({ home: config.home, retention: config.retention });
   if (options.lines === undefined) {
-    const record = await store.readRun(options.id);
-    await io.write(record.text);
+    await io.writeBytes(await store.readRunBytes(options.id));
     return 0;
   }
   const range = parseLineRange(options.lines);
-  await io.write(await store.readRunLines(options.id, range.from, range.to));
+  await io.writeBytes(await store.readRunLineBytes(options.id, range.from, range.to));
   return 0;
 }

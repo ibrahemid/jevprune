@@ -15,25 +15,31 @@ export async function removeHome(home: string): Promise<void> {
 
 export interface TestIo extends CliIo {
   out(): string;
+  outBytes(): Buffer;
   err(): string;
 }
 
-export function testIo(env: NodeJS.ProcessEnv, stdin = ""): TestIo {
-  let out = "";
+export function testIo(env: NodeJS.ProcessEnv, stdin: string | Buffer = ""): TestIo {
+  const chunks: Buffer[] = [];
   let err = "";
   return {
     env,
     cwd: process.cwd(),
-    stdin: Readable.from([Buffer.from(stdin, "utf8")]),
+    stdin: Readable.from([typeof stdin === "string" ? Buffer.from(stdin, "utf8") : stdin]),
     write: (text) => {
-      out += text;
+      chunks.push(Buffer.from(text, "utf8"));
+      return Promise.resolve();
+    },
+    writeBytes: (bytes) => {
+      chunks.push(Buffer.from(bytes));
       return Promise.resolve();
     },
     writeError: (text) => {
       err += text;
       return Promise.resolve();
     },
-    out: () => out,
+    out: () => Buffer.concat(chunks).toString("utf8"),
+    outBytes: () => Buffer.concat(chunks),
     err: () => err,
   };
 }

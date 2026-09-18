@@ -1,12 +1,20 @@
 import { loadConfig } from "../config.js";
 import { TYPESAFE_API_KEY_ENV } from "../core/index.js";
 import { UsageError, errorName } from "../errors.js";
-import { withFooter } from "../footer.js";
+import { footerAfter, withFooter } from "../footer.js";
 import type { CliIo } from "../io.js";
 import { shouldAnnounceMissingKey } from "../notices.js";
 import { clientFromEnv, recordRun } from "../prune.js";
+import type { RunMetaBase } from "../prune.js";
 import { runCommand } from "../runner.js";
-import { UNAUTHORIZED_REASON, selectLines } from "../select.js";
+import type { RunCapture } from "../runner.js";
+import {
+  NOT_UTF8_NOTE,
+  NOT_UTF8_REASON,
+  UNAUTHORIZED_REASON,
+  passthroughSelection,
+  selectLines,
+} from "../select.js";
 import { RunStore, newRunId } from "../store.js";
 import { resolveTask } from "../task.js";
 
@@ -16,6 +24,12 @@ export interface RunOptions {
   readonly threshold?: number | undefined;
   readonly hook?: boolean | undefined;
   readonly transcript?: string | undefined;
+}
+
+interface PassThroughInput {
+  readonly capture: RunCapture;
+  readonly store: RunStore;
+  readonly meta: RunMetaBase;
 }
 
 export async function runRun(options: RunOptions, io: CliIo): Promise<number> {
@@ -47,9 +61,24 @@ export async function runRun(options: RunOptions, io: CliIo): Promise<number> {
     env: io.env,
   });
 
+  const meta: RunMetaBase = {
+    id: runId,
+    command,
+    argv: [...options.argv],
+    startedAt: capture.startedAt,
+    endedAt: capture.endedAt,
+    exitCode: capture.exitCode,
+    signal: capture.signal,
+    bytes: capture.bytes,
+    lines: capture.lines,
+    task,
+  };
+
+  if (!capture.validUtf8) return await passThrough({ capture, store, meta }, io);
+
   try {
     const selection = await selectLines({
-      text: capture.text,
+      text: capture.captured.toString("utf8"),
       task,
       command,
       exitCode: capture.exitCode,
@@ -67,25 +96,40 @@ export async function runRun(options: RunOptions, io: CliIo): Promise<number> {
     const { footer } = await recordRun({
       store,
       selection,
-      meta: {
-        id: runId,
-        command,
-        argv: [...options.argv],
-        startedAt: capture.startedAt,
-        endedAt: capture.endedAt,
-        exitCode: capture.exitCode,
-        signal: capture.signal,
-        bytes: capture.bytes,
-        lines: capture.lines,
-        task,
-      },
+      meta,
       ...(capture.storeFailure !== undefined
         ? { storeFailureCode: capture.storeFailure.code ?? "failed" }
         : {}),
     });
     await io.write(withFooter(selection.kept, footer));
   } catch (error) {
-    await io.write(capture.text).catch(() => undefined);
+    await io.writeBytes(capture.captured).catch(() => undefined);
+    await io
+      .writeError(`jevprune: pruning failed (${errorName(error)}), output passed through\n`)
+      .catch(() => undefined);
+  }
+  return capture.exitCode;
+}
+
+async function passThrough(input: PassThroughInput, io: CliIo): Promise<number> {
+  const { capture } = input;
+  await io.writeBytes(capture.captured).catch(() => undefined);
+  try {
+    const { footer } = await recordRun({
+      store: input.store,
+      selection: passthroughSelection({
+        bytes: capture.bytes,
+        lines: capture.lines,
+        reason: NOT_UTF8_REASON,
+      }),
+      passthroughNote: NOT_UTF8_NOTE,
+      meta: input.meta,
+      ...(capture.storeFailure !== undefined
+        ? { storeFailureCode: capture.storeFailure.code ?? "failed" }
+        : {}),
+    });
+    await io.write(footerAfter(capture.captured.at(-1), footer)).catch(() => undefined);
+  } catch (error) {
     await io
       .writeError(`jevprune: pruning failed (${errorName(error)}), output passed through\n`)
       .catch(() => undefined);

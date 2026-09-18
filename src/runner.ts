@@ -3,6 +3,7 @@ import type { ChildProcessByStdio } from "node:child_process";
 import { constants } from "node:os";
 import type { Readable } from "node:stream";
 
+import { isValidUtf8 } from "./bytes.js";
 import { RunStoreError, SpawnError, UsageError, errorCode, errorMessage } from "./errors.js";
 import type { RunStore, RunWriter } from "./store.js";
 
@@ -15,7 +16,8 @@ const LF = 0x0a;
 const CR = 0x0d;
 
 export interface RunCapture {
-  readonly text: string;
+  readonly captured: Buffer;
+  readonly validUtf8: boolean;
   readonly bytes: number;
   readonly lines: number;
   readonly headSegmentLines: number;
@@ -119,11 +121,11 @@ class CaptureBuffer {
     this.#trimRing();
   }
 
-  text(): string {
-    if (!this.#oversize) return Buffer.concat(this.#head).toString("utf8");
+  bytes(): Buffer {
+    if (!this.#oversize) return Buffer.concat(this.#head);
     const head = trimToLastTerminator(Buffer.concat(this.#head));
     const tail = trimToFirstLine(Buffer.concat(this.#ring));
-    return Buffer.concat([head, tail]).toString("utf8");
+    return Buffer.concat([head, tail]);
   }
 
   #trimRing(): void {
@@ -195,8 +197,10 @@ export async function runCommand(input: RunCommandInput): Promise<RunCapture> {
   }
   storeFailure = writer.failure ?? storeFailure;
 
+  const captured = buffer.bytes();
   return {
-    text: buffer.text(),
+    captured,
+    validUtf8: isValidUtf8(captured),
     bytes,
     lines: counter.lines,
     headSegmentLines: buffer.headSegmentLines,
