@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "description": "Keep only the lines of a command's output that matter for the current task, decided per line by Jev, with the full output saved on disk",
   "license": "MIT",
+  "author": "ibrahemid",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ibrahemid/jevprune.git"
+  },
+  "homepage": "https://github.com/ibrahemid/jevprune#readme",
+  "bugs": {
+    "url": "https://github.com/ibrahemid/jevprune/issues"
+  },
   "type": "module",
   "engines": {
     "node": ">=22"
