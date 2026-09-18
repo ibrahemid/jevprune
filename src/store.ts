@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { appendFile, mkdir, open, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { join } from "node:path";
@@ -190,6 +191,18 @@ export class RunStore {
     const path = this.logPath(id);
     try {
       return await readFile(path);
+    } catch (error) {
+      if (errorCode(error) === "ENOENT") throw new RunNotFoundError(id, { cause: error });
+      throw storeError(`run log ${path} could not be read`, error);
+    }
+  }
+
+  async *readRunChunks(id: string): AsyncGenerator<Buffer> {
+    const path = this.logPath(id);
+    try {
+      for await (const chunk of createReadStream(path) as AsyncIterable<Buffer | string>) {
+        yield typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk;
+      }
     } catch (error) {
       if (errorCode(error) === "ENOENT") throw new RunNotFoundError(id, { cause: error });
       throw storeError(`run log ${path} could not be read`, error);

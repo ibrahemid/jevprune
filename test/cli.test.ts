@@ -336,6 +336,43 @@ describe("cli run", () => {
   });
 
 
+  it("streams the whole run log when an oversize command fails", async () => {
+    await writeConfig(home, { fastPathLines: 0, maxPruneBytes: 1024, headLines: 2, tailLines: 2 });
+    const io = testIo(homeEnv(home));
+    const script =
+      "for (let i = 1; i <= 200; i += 1) process.stdout.write('line ' + i + ' ' + 'y'.repeat(30) + '\\n'); process.exitCode = 5;";
+    expect(await runCli(["run", "--task", "read the output", "--", ...node(script)], io)).toBe(5);
+
+    let produced = "";
+    for (let i = 1; i <= 200; i += 1) produced += `line ${String(i)} ${"y".repeat(30)}\n`;
+    const expected = Buffer.from(produced, "utf8");
+    const printed = io.outBytes();
+    expect(printed.subarray(0, expected.length)).toEqual(expected);
+
+    const [id] = await runIds();
+    expect(printed.subarray(expected.length).toString("utf8")).toBe(
+      `jevprune: exit 5, 200 lines passed through, full output ${join(home, "runs", `${String(id)}.log`)}\n`,
+    );
+
+    const record = await new RunStore({ home }).readRun(String(id));
+    expect(record.text).toBe(produced);
+    expect(record.meta?.mode).toBe("passthrough");
+  });
+
+  it("prints the truncated capture when an oversize command fails and the run store is unavailable", async () => {
+    await writeConfig(home, { fastPathLines: 0, maxPruneBytes: 1024, headLines: 2, tailLines: 2 });
+    await writeFile(join(home, "runs"), "", "utf8");
+    const io = testIo(homeEnv(home));
+    const script =
+      "for (let i = 1; i <= 200; i += 1) process.stdout.write('line ' + i + ' ' + 'y'.repeat(30) + '\\n'); process.exitCode = 5;";
+    expect(await runCli(["run", "--task", "read the output", "--", ...node(script)], io)).toBe(5);
+
+    expect(io.out()).toMatch(/^line 1 y+\n/);
+    expect(io.out()).toContain(
+      "jevprune: exit 5, 200 lines passed through (output over 1024 bytes), run store unavailable (EEXIST)\n",
+    );
+  });
+
   it("reports a missing executable with exit 127", async () => {
     const io = testIo(homeEnv(home));
     expect(await runCli(["run", "--", join(home, "missing-binary")], io)).toBe(127);

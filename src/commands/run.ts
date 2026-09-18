@@ -1,6 +1,6 @@
 import { loadConfig } from "../config.js";
 import { TYPESAFE_API_KEY_ENV } from "../core/index.js";
-import { UsageError, errorName } from "../errors.js";
+import { RunStoreError, UsageError, errorName } from "../errors.js";
 import { footerAfter, withFooter } from "../footer.js";
 import type { CliIo } from "../io.js";
 import { shouldAnnounceMissingKey } from "../notices.js";
@@ -30,6 +30,7 @@ interface PassThroughInput {
   readonly capture: RunCapture;
   readonly store: RunStore;
   readonly meta: RunMetaBase;
+  readonly maxPruneBytes: number;
 }
 
 export async function runRun(options: RunOptions, io: CliIo): Promise<number> {
@@ -74,7 +75,10 @@ export async function runRun(options: RunOptions, io: CliIo): Promise<number> {
     task,
   };
 
-  if (!capture.validUtf8) return await passThrough({ capture, store, meta }, io);
+  const failed = capture.exitCode !== 0 || capture.interrupted;
+  if (!capture.validUtf8 || (capture.oversize && failed)) {
+    return await passThrough({ capture, store, meta, maxPruneBytes: config.maxPruneBytes }, io);
+  }
 
   try {
     const selection = await selectLines({
@@ -113,22 +117,48 @@ export async function runRun(options: RunOptions, io: CliIo): Promise<number> {
 
 async function passThrough(input: PassThroughInput, io: CliIo): Promise<number> {
   const { capture } = input;
-  await io.writeBytes(capture.captured).catch(() => undefined);
+  let storeFailureCode = capture.storeFailure === undefined ? undefined : (capture.storeFailure.code ?? "failed");
+  let written = 0;
+  let lastByte: number | undefined;
+  let complete = false;
+
+  if (capture.oversize && storeFailureCode === undefined) {
+    try {
+      for await (const chunk of input.store.readRunChunks(input.meta.id)) {
+        await io.writeBytes(chunk).catch(() => undefined);
+        if (chunk.length === 0) continue;
+        written += chunk.length;
+        lastByte = chunk[chunk.length - 1];
+      }
+      complete = true;
+    } catch (error) {
+      storeFailureCode = error instanceof RunStoreError ? (error.code ?? "failed") : "failed";
+    }
+  }
+
+  if (!complete && written === 0) {
+    await io.writeBytes(capture.captured).catch(() => undefined);
+    lastByte = capture.captured.at(-1);
+    complete = !capture.oversize;
+  }
+
+  const oversizeReason = `output over ${String(input.maxPruneBytes)} bytes`;
+  const reason = capture.validUtf8 ? (complete ? undefined : oversizeReason) : NOT_UTF8_REASON;
+  const note = capture.validUtf8 ? reason : NOT_UTF8_NOTE;
+
   try {
     const { footer } = await recordRun({
       store: input.store,
       selection: passthroughSelection({
         bytes: capture.bytes,
         lines: capture.lines,
-        reason: NOT_UTF8_REASON,
+        ...(reason !== undefined ? { reason } : {}),
       }),
-      passthroughNote: NOT_UTF8_NOTE,
+      ...(note !== undefined ? { passthroughNote: note } : {}),
       meta: input.meta,
-      ...(capture.storeFailure !== undefined
-        ? { storeFailureCode: capture.storeFailure.code ?? "failed" }
-        : {}),
+      ...(storeFailureCode !== undefined ? { storeFailureCode } : {}),
     });
-    await io.write(footerAfter(capture.captured.at(-1), footer)).catch(() => undefined);
+    await io.write(footerAfter(lastByte, footer)).catch(() => undefined);
   } catch (error) {
     await io
       .writeError(`jevprune: pruning failed (${errorName(error)}), output passed through\n`)
