@@ -1,0 +1,58 @@
+{
+  "name": "jevprune",
+  "version": "0.1.0",
+  "description": "Keep only the lines of a command's output that matter for the current task, decided per line by Jev, with the full output saved on disk",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "jevprune": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "gate": "scripts/gate.sh",
+    "prepublishOnly": "scripts/gate.sh && tsup"
+  },
+  "keywords": [
+    "claude-code",
+    "typesafe",
+    "jev",
+    "cli",
+    "context",
+    "tokens",
+    "output",
+    "pruning"
+  ],
+  "packageManager": "pnpm@10.13.1",
+  "dependencies": {
+    "@typesafe-ai/sdk": "0.6.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.20.3",
+    "eslint": "^10.10.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^5.0.1"
+  }
+}
