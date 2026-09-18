@@ -214,7 +214,7 @@ describe("selectLines", () => {
     };
     const noKey = await selectLines({ ...base, client: null });
     expect(noKey.mode).toBe("fallback");
-    expect(noKey.fallbackReason).toBe("API key not set");
+    expect(noKey.fallbackReason).toEqual({ kind: "unavailable", detail: "API key not set" });
     expect(noKey.linesIn).toBe(lines.length);
     expect(noKey.linesOut).toBe(12);
     expect(noKey.decisions.get(1)).toEqual({ keep: true, reason: "head" });
@@ -244,7 +244,7 @@ describe("selectLines", () => {
       const client = new FakeJevClient({ failWith: () => error });
       const result = await selectLines({ ...base, client });
       expect(result.mode, reason).toBe("fallback");
-      expect(result.fallbackReason).toBe(reason);
+      expect(result.fallbackReason).toEqual({ kind: "unavailable", detail: reason });
       expect(result.kept).toBe(noKey.kept);
     }
   });
@@ -262,7 +262,7 @@ describe("selectLines", () => {
     };
     const result = await selectLines({ ...base, exitCode: 0 });
     expect(result.mode).toBe("fallback");
-    expect(result.fallbackReason).toBe("output over 1048576 bytes");
+    expect(result.fallbackReason).toEqual({ kind: "size-limit", maxBytes: 1_048_576 });
     expect(result.linesIn).toBe(51_234);
     expect(result.linesOut).toBe(12);
     expect(client.calls).toEqual([]);

@@ -196,7 +196,7 @@ describe("cli run", () => {
     expect(await runCli(["run", "--task", "check the output", "--", ...node(script)], io)).toBe(0);
 
     const [id] = await runIds();
-    expect(io.out()).toContain("jevprune: fallback (Jev unavailable: output over 1024 bytes), 200 → ");
+    expect(io.out()).toContain("jevprune: fallback (output over 1024 bytes), 200 → ");
     expect(io.out()).toContain(`full output ${join(home, "runs", `${String(id)}.log`)}`);
 
     const record = await new RunStore({ home }).readRun(String(id));
@@ -208,7 +208,7 @@ describe("cli run", () => {
 
   it("numbers every printed line and every marker of a truncated capture by the run log", async () => {
     const run = await truncatedRun(65_536, 6_000);
-    expect(run.footer).toContain("jevprune: fallback (Jev unavailable: output over 65536 bytes), 6,000 → ");
+    expect(run.footer).toContain("jevprune: fallback (output over 65536 bytes), 6,000 → ");
     expect(run.log).toHaveLength(6_000);
     const [marker] = markersOf(run.printed);
     expect(markersOf(run.printed)).toHaveLength(1);
@@ -550,7 +550,7 @@ describe("cli select", () => {
 
     const io = testIo(homeEnv(home));
     expect(await runCli(["select", "--task", "read it", "--file", path], io)).toBe(0);
-    expect(io.out()).toContain("jevprune: fallback (Jev unavailable: output over 1024 bytes), 200 → ");
+    expect(io.out()).toContain("jevprune: fallback (output over 1024 bytes), 200 → ");
 
     const [id] = await runIds();
     expect(await readFile(join(home, "runs", `${String(id)}.log`), "utf8")).toBe(text);

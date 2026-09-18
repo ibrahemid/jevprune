@@ -143,7 +143,7 @@ describe("pruneOutput", () => {
       config: { headLines: 5, tailLines: 4, contextLines: 0 },
     });
     expect(result.mode).toBe("fallback");
-    expect(result.fallbackReason).toBe("API key not set");
+    expect(result.fallbackReason).toEqual({ kind: "unavailable", detail: "API key not set" });
     expect(result.linesIn).toBe(splitLines(text).length);
     expect(result.linesOut).toBe(10);
     expect(result.kept).toContain("[1/100] copying asset-1");
@@ -196,10 +196,10 @@ describe("pruneOutput", () => {
 
     expect(client.calls).toEqual([]);
     expect(result.mode).toBe("fallback");
-    expect(result.fallbackReason).toBe("output over 1024 bytes");
+    expect(result.fallbackReason).toEqual({ kind: "size-limit", maxBytes: 1024 });
     expect(result.linesIn).toBe(splitLines(text).length);
     expect(result.linesOut).toBeLessThan(result.linesIn);
-    expect(result.footer).toContain("fallback (Jev unavailable: output over 1024 bytes)");
+    expect(result.footer).toContain("fallback (output over 1024 bytes)");
     expect((await new RunStore({ home }).readRun(result.runId)).text).toBe(text);
   });
 
@@ -216,7 +216,7 @@ describe("pruneOutput", () => {
 
     expect(client.calls).toEqual([]);
     expect(result.mode).toBe("fallback");
-    expect(result.fallbackReason).toBe("output over 1024 bytes");
+    expect(result.fallbackReason).toEqual({ kind: "size-limit", maxBytes: 1024 });
   });
 
   it("applies the config overrides over the loaded config", async () => {
@@ -268,7 +268,7 @@ describe("pruneStream", () => {
 
     expect(client.calls).toEqual([]);
     expect(result.mode).toBe("fallback");
-    expect(result.fallbackReason).toBe("output over 65536 bytes");
+    expect(result.fallbackReason).toEqual({ kind: "size-limit", maxBytes: 65_536 });
     expect(result.linesIn).toBe(20_000);
     expect(result.linesOut).toBeLessThan(result.linesIn);
 

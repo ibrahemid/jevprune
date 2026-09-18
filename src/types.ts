@@ -13,6 +13,11 @@ export type DecisionReason =
   | "head"
   | "fallback";
 
+export type FallbackReason =
+  | { readonly kind: "unavailable"; readonly detail: string }
+  | { readonly kind: "size-limit"; readonly maxBytes: number }
+  | { readonly kind: "not-utf8" };
+
 export interface Decision {
   keep: boolean;
   reason: DecisionReason;

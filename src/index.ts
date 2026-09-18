@@ -31,6 +31,7 @@ export {
   NOT_UTF8_NOTE,
   NOT_UTF8_REASON,
   RUBRIC,
+  fallbackReasonText,
   passthroughSelection,
   questionFor,
   selectLines,
@@ -40,4 +41,4 @@ export { RunStore, newRunId } from "./store.js";
 export type { GainEntry, GainTotals, RunMeta, RunRecord, RunWriter } from "./store.js";
 export { MAX_TASK_LENGTH, resolveTask } from "./task.js";
 export type { ResolvedTask, TaskInput, TaskSource } from "./task.js";
-export type { Decision, DecisionReason, DroppedRange, SelectionMode } from "./types.js";
+export type { Decision, DecisionReason, DroppedRange, FallbackReason, SelectionMode } from "./types.js";

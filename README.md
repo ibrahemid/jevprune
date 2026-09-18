@@ -96,6 +96,12 @@ A missing or rejected key, a rate limit, an outage, a timeout or a malformed ans
 jevprune: fallback (Jev unavailable: timeout), 3,104 → 83 lines, exit 0, full output ~/.jevprune/runs/<id>.log
 ```
 
+Input over the size limit takes the same selection with no Jev request, and its footer names the limit rather than an unavailable Jev:
+
+```
+jevprune: fallback (output over 16777216 bytes), 51,234 → 83 lines, exit 0, full output ~/.jevprune/runs/<id>.log
+```
+
 ## Claude Code plugin
 
 ```sh
@@ -167,7 +173,7 @@ result.footer;         // status text, separate from kept
 result.mode;           // "fast-path" | "passthrough" | "jev" | "fallback"
 result.linesIn;        // lines read
 result.linesOut;       // lines in kept
-result.fallbackReason; // defined only in fallback mode
+result.fallbackReason; // fallback mode only: { kind: "unavailable", detail } or { kind: "size-limit", maxBytes }
 ```
 
 | input | effect |

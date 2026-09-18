@@ -6,11 +6,11 @@ import { JevConfigError, createJevClientFromEnv } from "./core/index.js";
 import type { JevClient } from "./core/index.js";
 import { RunStoreError } from "./errors.js";
 import { formatFooter } from "./footer.js";
-import { selectLines } from "./select.js";
+import { fallbackReasonText, selectLines } from "./select.js";
 import type { SelectionResult } from "./select.js";
 import { RunStore, newRunId } from "./store.js";
 import type { RunMeta, RunWriter } from "./store.js";
-import type { DroppedRange, SelectionMode } from "./types.js";
+import type { DroppedRange, FallbackReason, SelectionMode } from "./types.js";
 
 export interface PruneInput {
   readonly text: string;
@@ -34,7 +34,7 @@ export interface PruneResult {
   readonly mode: SelectionMode;
   readonly linesIn: number;
   readonly linesOut: number;
-  readonly fallbackReason?: string;
+  readonly fallbackReason?: FallbackReason;
   readonly logPath?: string;
   readonly footer: string;
 }
@@ -147,7 +147,9 @@ export async function recordRun(input: RecordRunInput): Promise<RecordRunResult>
           ...meta,
           mode: selection.mode,
           linesOut: selection.linesOut,
-          ...(selection.fallbackReason !== undefined ? { fallbackReason: selection.fallbackReason } : {}),
+          ...(selection.fallbackReason !== undefined
+            ? { fallbackReason: fallbackReasonText(selection.fallbackReason) }
+            : {}),
         });
       }
       await store.appendGain({
@@ -158,7 +160,9 @@ export async function recordRun(input: RecordRunInput): Promise<RecordRunResult>
         linesOut: selection.linesOut,
         bytesIn: selection.bytesIn,
         bytesOut: selection.bytesOut,
-        ...(selection.fallbackReason !== undefined ? { reason: selection.fallbackReason } : {}),
+        ...(selection.fallbackReason !== undefined
+          ? { reason: fallbackReasonText(selection.fallbackReason) }
+          : {}),
       });
       await store.enforceRetention();
     } catch (error) {

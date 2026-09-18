@@ -16,18 +16,44 @@ describe("formatFooter", () => {
     ).toBe("jevprune: 3,104 → 88 lines, exit 0, full output ~/.jevprune/runs/abc-1234.log");
   });
 
-  it("names the fallback reason", () => {
+  it("names the reason Jev was unavailable", () => {
     expect(
       formatFooter({
         mode: "fallback",
         linesIn: 3_104,
         linesOut: 83,
         exitCode: 0,
-        fallbackReason: "timeout",
+        fallbackReason: { kind: "unavailable", detail: "timeout" },
         logPath: "/tmp/runs/abc-1234.log",
         home: "/home/dev",
       }),
     ).toBe("jevprune: fallback (Jev unavailable: timeout), 3,104 → 83 lines, exit 0, full output /tmp/runs/abc-1234.log");
+  });
+
+  it("names the size limit without claiming Jev was unavailable", () => {
+    expect(
+      formatFooter({
+        mode: "fallback",
+        linesIn: 3_104,
+        linesOut: 83,
+        exitCode: 0,
+        fallbackReason: { kind: "size-limit", maxBytes: 1_048_576 },
+        logPath: "/tmp/runs/abc-1234.log",
+        home: "/home/dev",
+      }),
+    ).toBe("jevprune: fallback (output over 1048576 bytes), 3,104 → 83 lines, exit 0, full output /tmp/runs/abc-1234.log");
+  });
+
+  it("names non-UTF-8 output in a fallback footer", () => {
+    expect(
+      formatFooter({
+        mode: "fallback",
+        linesIn: 12,
+        linesOut: 8,
+        exitCode: 0,
+        fallbackReason: { kind: "not-utf8" },
+      }),
+    ).toBe("jevprune: fallback (output is not valid UTF-8), 12 → 8 lines, exit 0");
   });
 
   it("reports a passthrough run with the exit code first", () => {

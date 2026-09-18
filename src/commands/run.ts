@@ -8,15 +8,10 @@ import { clientFromEnv, recordRun } from "../prune.js";
 import type { RunMetaBase } from "../prune.js";
 import { runCommand } from "../runner.js";
 import type { RunCapture } from "../runner.js";
-import {
-  NOT_UTF8_NOTE,
-  NOT_UTF8_REASON,
-  UNAUTHORIZED_REASON,
-  passthroughSelection,
-  selectLines,
-} from "../select.js";
+import { NOT_UTF8_NOTE, UNAUTHORIZED_REASON, fallbackReasonText, passthroughSelection, selectLines } from "../select.js";
 import { RunStore, newRunId } from "../store.js";
 import { resolveTask } from "../task.js";
+import type { FallbackReason } from "../types.js";
 
 export interface RunOptions {
   readonly argv: readonly string[];
@@ -94,7 +89,8 @@ export async function runRun(options: RunOptions, io: CliIo): Promise<number> {
       config,
       runId,
     });
-    if (options.hook === true && selection.fallbackReason === UNAUTHORIZED_REASON) {
+    const reason = selection.fallbackReason;
+    if (options.hook === true && reason?.kind === "unavailable" && reason.detail === UNAUTHORIZED_REASON) {
       await io.writeError(`jevprune: ${TYPESAFE_API_KEY_ENV} rejected (401), using fallback\n`).catch(() => undefined);
     }
     const { footer } = await recordRun({
@@ -142,9 +138,13 @@ async function passThrough(input: PassThroughInput, io: CliIo): Promise<number> 
     complete = !capture.oversize;
   }
 
-  const oversizeReason = `output over ${String(input.maxPruneBytes)} bytes`;
-  const reason = capture.validUtf8 ? (complete ? undefined : oversizeReason) : NOT_UTF8_REASON;
-  const note = capture.validUtf8 ? reason : NOT_UTF8_NOTE;
+  const oversizeReason: FallbackReason = { kind: "size-limit", maxBytes: input.maxPruneBytes };
+  const reason: FallbackReason | undefined = capture.validUtf8
+    ? complete
+      ? undefined
+      : oversizeReason
+    : { kind: "not-utf8" };
+  const note = capture.validUtf8 ? (reason === undefined ? undefined : fallbackReasonText(reason)) : NOT_UTF8_NOTE;
 
   try {
     const { footer } = await recordRun({

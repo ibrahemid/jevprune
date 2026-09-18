@@ -37,7 +37,7 @@ describe.skipIf(!LIVE)("live jev", () => {
       const slow = await pruneOutput({ ...base, task: "why is the build slow" });
 
       for (const result of [auth, slow]) {
-        expect(result.mode, result.fallbackReason).toBe("jev");
+        expect(result.mode, JSON.stringify(result.fallbackReason)).toBe("jev");
         expect(result.kept).toContain("FAIL  src/auth/login.test.ts");
         expect(result.kept).toContain("AssertionError: expected 200 to be 401");
         expect(result.kept).toContain("❯ src/auth/login.test.ts:88:29");

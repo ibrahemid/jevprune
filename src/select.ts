@@ -14,7 +14,7 @@ import type { KeepReason } from "./keeps.js";
 import { splitLines } from "./lines.js";
 import { mergeDecisions } from "./merge.js";
 import type { Line } from "./lines.js";
-import type { Decision, DroppedRange, SelectionMode } from "./types.js";
+import type { Decision, DroppedRange, FallbackReason, SelectionMode } from "./types.js";
 
 export interface OversizeCapture {
   readonly lines: number;
@@ -48,7 +48,7 @@ export interface SelectInput {
 export interface PassthroughInput {
   readonly bytes: number;
   readonly lines: number;
-  readonly reason?: string;
+  readonly reason?: FallbackReason;
 }
 
 export interface SelectionResult {
@@ -62,7 +62,7 @@ export interface SelectionResult {
   readonly windows: number;
   readonly jevRequests: number;
   readonly jevInputTokens: number;
-  readonly fallbackReason?: string;
+  readonly fallbackReason?: FallbackReason;
   readonly decisions: Map<number, Decision>;
 }
 
@@ -74,7 +74,7 @@ interface FallbackInput {
   readonly lines: readonly Line[];
   readonly keeps: Map<number, KeepReason>;
   readonly input: SelectInput;
-  readonly reason: string;
+  readonly reason: FallbackReason;
   readonly bytesIn: number;
   readonly linesIn: number;
 }
@@ -83,7 +83,7 @@ interface FallbackMerge {
   readonly lines: readonly Line[];
   readonly decisions: Map<number, Decision>;
   readonly input: SelectInput;
-  readonly reason: string;
+  readonly reason: FallbackReason;
   readonly bytesIn: number;
   readonly linesIn: number;
   readonly totalLines?: number;
@@ -153,7 +153,7 @@ export async function selectLines(input: SelectInput): Promise<SelectionResult> 
       lines,
       keeps,
       input,
-      reason: "API key not set",
+      reason: { kind: "unavailable", detail: "API key not set" },
       bytesIn,
       linesIn: lines.length,
     });
@@ -167,7 +167,7 @@ export async function selectLines(input: SelectInput): Promise<SelectionResult> 
       lines,
       keeps,
       input,
-      reason: fallbackReason(error),
+      reason: unavailableReason(error),
       bytesIn,
       linesIn: lines.length,
     });
@@ -290,7 +290,7 @@ function oversizeSelection(
     lines,
     decisions: fallbackDecisions(lines, keeps, input.config.headLines),
     input,
-    reason: `output over ${String(input.config.maxPruneBytes)} bytes`,
+    reason: { kind: "size-limit", maxBytes: input.config.maxPruneBytes },
     bytesIn,
     linesIn: totalLines,
     totalLines,
@@ -339,7 +339,22 @@ function fallbackResult(fallback: FallbackMerge): SelectionResult {
   };
 }
 
-export function fallbackReason(error: unknown): string {
+export function fallbackReasonText(reason: FallbackReason): string {
+  switch (reason.kind) {
+    case "size-limit":
+      return `output over ${String(reason.maxBytes)} bytes`;
+    case "not-utf8":
+      return NOT_UTF8_REASON;
+    case "unavailable":
+      return reason.detail;
+  }
+}
+
+export function unavailableReason(error: unknown): FallbackReason {
+  return { kind: "unavailable", detail: unavailableDetail(error) };
+}
+
+function unavailableDetail(error: unknown): string {
   if (error instanceof JevTimeoutError) return "timeout";
   if (error instanceof JevResponseError) return "invalid response";
   if (error instanceof JevRequestError) {

@@ -7,7 +7,7 @@ import { footerAfter, withFooter } from "../footer.js";
 import type { CliIo } from "../io.js";
 import { readStreamBytes } from "../io.js";
 import { pruneOutput, recordRun } from "../prune.js";
-import { NOT_UTF8_NOTE, NOT_UTF8_REASON, passthroughSelection } from "../select.js";
+import { NOT_UTF8_NOTE, passthroughSelection } from "../select.js";
 import { RunStore, newRunId } from "../store.js";
 import { resolveTask } from "../task.js";
 
@@ -64,7 +64,7 @@ async function passThrough(input: PassThroughInput, io: CliIo): Promise<number> 
   const startedAt = new Date().toISOString();
   const { footer } = await recordRun({
     store,
-    selection: passthroughSelection({ bytes: input.bytes.length, lines, reason: NOT_UTF8_REASON }),
+    selection: passthroughSelection({ bytes: input.bytes.length, lines, reason: { kind: "not-utf8" } }),
     logBytes: input.bytes,
     passthroughNote: NOT_UTF8_NOTE,
     meta: {
