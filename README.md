@@ -4,7 +4,7 @@ jevprune filters long command output for coding agents using a task description.
 
 ## Install
 
-Requires Node.js 22 or later. Jev selection also requires an early-access TypeSafe API key; without one, jevprune uses its documented fallback. Keys come from the waitlist at [typesafe.ai](https://typesafe.ai).
+Requires Node.js 22 or later. Jev selection also requires an early-access TypeSafe API key. Without one, jevprune keeps the first 40 lines, the last 40 lines, and every error line with the 3 lines around it. Keys come from the waitlist at [typesafe.ai](https://typesafe.ai).
 
 ```sh
 npm install -g jevprune
@@ -12,8 +12,6 @@ export TYPESAFE_API_KEY=...
 ```
 
 Line relevance is decided per line by [Jev](https://typesafe.ai), TypeSafe's model. For Jev-selected runs, jevprune sends the task, command, and candidate output lines to the TypeSafe API. Blank lines and lines kept by deterministic rules are not sent.
-
-Plugin setup for Claude Code is a separate section below.
 
 ## Quick start
 
@@ -73,7 +71,7 @@ In these recorded runs, the auth task kept 54 of 2,979 lines and the timing task
 ## How selection and recovery work
 
 1. 60 lines or fewer: everything, untouched, no request made.
-2. `run` passes through all output when its command exits non-zero or receives a signal. Failure output is evidence and is never pruned. `select` does not know the producer's exit status.
+2. `run` passes through all output when its command exits non-zero or receives a signal. `select` does not know the producer's exit status, so it can prune a failure log.
 3. Otherwise, before Jev: the last 40 lines, every line matching an error signature (`FAIL`, `error:`, `AssertionError`, `Traceback`, stack frames, `exited with code`, and similar), and the 3 lines on each side of it. Repeated identical signature lines count once.
 4. The remaining lines go to Jev in windows, one yes/no question per line: is this line needed for the task? Lines scoring at or above the threshold (default 0.3) are kept.
 5. Dropped runs shorter than 3 lines are kept. Longer ones collapse into one marker:
@@ -92,7 +90,7 @@ jevprune preserves every retained command line byte-for-byte and in its original
 
 A dropped line may have mattered. When a line you expect is missing, run `show` on the marker's range before concluding it is absent. When the footer includes `full output <path>`, `jevprune show <id> --lines A-B` prints that saved range exactly. If the footer says `full output was not saved`, dropped ranges cannot be recovered. Retention deletes the oldest saved runs once either limit in the configuration table is reached, so an older run can become unavailable.
 
-No key, a rejected key, a rate limit, an outage, a timeout or a malformed answer never fails the command. jevprune keeps the deterministic set plus the first 40 and last 40 lines and says so in the footer:
+A missing or rejected key, a rate limit, an outage, a timeout or a malformed answer does not fail the command. jevprune keeps the deterministic set plus the first 40 and last 40 lines and says so in the footer:
 
 ```
 jevprune: fallback (Jev unavailable: timeout), 3,104 → 83 lines, exit 0, full output ~/.jevprune/runs/<id>.log
@@ -107,7 +105,7 @@ claude plugin install jevprune@jevprune
 
 The plugin bundles a skill and an optional Bash rewrite hook. Both call the globally installed `jevprune` binary. Without the binary, commands run as before.
 
-The skill is the default path. It tells the agent to call `jevprune run --task "<task>" -- <command>` itself, so the command that runs is the command the agent wrote and the user approved, and nothing is rewritten behind the permission rules. That command is still a different command: `Bash(npm test:*)` does not match `jevprune run --task ... -- npm test`, so a wrapped run is approved under its own rule. A rule like `Bash(jevprune run:*)` approves any command run through the wrapper.
+The skill is the default path. It tells the agent to call `jevprune run --task "<task>" -- <command>` itself, so the user sees and approves the exact command that runs and nothing is rewritten after approval. It is still a different command from a bare `npm test`: a rule like `Bash(npm test:*)` does not match it, so the wrapped run needs its own approval. `Bash(jevprune run:*)` approves any command run through the wrapper.
 
 The rewrite hook is off by default. Set `"autoWrap": true` in `~/.jevprune/config.json` to turn it on. A `PreToolUse` hook then rewrites the command to `jevprune run --hook --transcript <path> -- bash -c '<command>'`. `bash -c` keeps pipelines, redirects and quoting as the agent wrote them; jevprune only owns capture and selection. Permission rules are matched against the rewritten command, so rules such as `Bash(npm test:*)` stop matching: an interactive session prompts for each wrapped command, and a headless run can be denied.
 
@@ -128,7 +126,7 @@ The hook leaves a command alone when it is already wrapped, runs in the backgrou
 | `windowTokens` | `25000` | estimated token budget per Jev request |
 | `windowTimeoutMs` | `10000` | per-window timeout before fallback |
 | `concurrency` | `4` | Jev requests in flight |
-| `maxPruneBytes` | `16777216` | bytes (16 MiB); larger successful outputs use fallback on the head and tail |
+| `maxPruneBytes` | `16777216` | bytes (16 MiB); larger input is pruned by head and tail, with no Jev request |
 | `retention.maxRuns` | `200` | maximum saved runs before the oldest are deleted |
 | `retention.maxBytes` | `268435456` | maximum saved-run bytes (256 MiB) before the oldest are deleted |
 | `autoWrap` | `false` | when true, the plugin hook rewrites Bash commands |
@@ -177,24 +175,24 @@ result.fallbackReason; // defined only in fallback mode
 | `text` | the output to prune |
 | `task` | the task the kept lines have to serve |
 | `command` | supplies selection context |
-| `exitCode` | a non-zero code passes the output through; omitted or `null` means unknown and can be pruned |
+| `exitCode` | a non-zero code passes the output through, unless the input is over `maxPruneBytes`; omitted or `null` means unknown and can be pruned |
 | `client` | a supplied Jev client; `null` disables API selection, so eligible output uses the fallback |
 | `config` | overrides the loaded configuration values |
 | `env` | controls configuration and the default client |
 | `save` | `false` disables the run store |
 
-The four modes: `fast-path` for output within `fastPathLines`, `passthrough` for a failed command or non-UTF-8 output, `jev` for an API-selected run, `fallback` when Jev was unavailable. `fast-path` and `save: false` return a `runId` with no `logPath`, and `jevprune show` cannot read those runs.
+The four modes: `fast-path` for output within `fastPathLines`, `passthrough` for a failed command or non-UTF-8 output, `jev` for an API-selected run, `fallback` when Jev was unavailable or the input was over `maxPruneBytes`. `fast-path` and `save: false` return a `runId` with no `logPath`, and `jevprune show` cannot read those runs.
 
-`pruneStream` has the same contract with `stream` replacing `text`. `FakeJevClient` is exported for tests.
+`pruneStream` has the same contract with `stream` replacing `text`. It holds only the head and the tail in memory, and with the run store enabled it streams the whole input there, so a stream over `maxPruneBytes` is pruned by head and tail and `show` still prints any dropped range. `FakeJevClient` is exported for tests.
 
 ## Limits and data handling
 
-- Saved runs and metadata are stored under `~/.jevprune`. For Jev-selected runs, the task, command, and candidate output lines go to the TypeSafe API.
+- Saved runs and metadata are stored under `~/.jevprune`. The data sent to the TypeSafe API is listed under Install.
 - `select` exits 0 when it processes its input. It cannot report the exit status of the command that produced that input.
 - Needs an early-access TypeSafe key. Without one, every pruned run is the head-and-tail fallback.
 - Selection sends several requests for a long output and spends input tokens on the TypeSafe account that issued the key.
 - `run` takes an executable and arguments, no shell string. Use `bash -c '...'` for pipelines, which is what the rewrite hook does.
-- Successful outputs over 16 MiB are pruned by head and tail only. Failed ones pass through in full.
+- Input over 16 MiB is pruned by head and tail, with no Jev request. `run` still prints a failed command's output from its saved run log; when that log could not be saved, the footer says `full output was not saved` and the printed output is incomplete.
 - Output that is not valid UTF-8 passes through untouched.
 
 ## Alternatives

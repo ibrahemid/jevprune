@@ -19,7 +19,7 @@ jevprune run --task "<task>" -- <command> [args...]
 jevprune run --task "<task>" -- bash -c '<command> 2>&1'
 ```
 
-The exit code is the command's own. Short output and output from a failed command are printed in full.
+The exit code is the command's own. Short output and output from a failed command are printed in full, unless the output ran past the size limit and its run log could not be saved.
 
 For output that is already in a file:
 
@@ -34,7 +34,7 @@ jevprune select --task "<task>" --file build.log
 A line starting with `jevprune:` under a command's output is a footer, not output. It reports what was pruned.
 
 - `jevprune: 3,104 → 88 lines, exit 0, full output ~/.jevprune/runs/m4x2k1-9f3a.log`: 3,104 lines were captured, 88 were printed, the command exited 0, and the full output is at that path.
-- `jevprune: fallback (Jev unavailable: <reason>), ...`: Jev was unavailable, so the first and last lines, error signatures, and their surrounding context were kept.
+- `jevprune: fallback (Jev unavailable: <reason>), ...`: Jev was not used, so the first and last lines, error signatures, and their surrounding context were kept. The reason can also be an input over the size limit.
 - `jevprune: exit 1, 3,104 lines passed through, ...`: nothing was dropped.
 - `..., full output was not saved (<code>)`: the run log could not be written, so dropped lines cannot be recovered.
 
