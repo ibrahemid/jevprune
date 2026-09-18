@@ -54,7 +54,9 @@ export async function runRun(options: RunOptions, io: CliIo): Promise<number> {
       command,
       exitCode: capture.exitCode,
       interrupted: capture.interrupted,
-      ...(capture.oversize ? { oversize: { lines: capture.lines } } : {}),
+      ...(capture.oversize
+        ? { oversize: { lines: capture.lines, headSegmentLines: capture.headSegmentLines } }
+        : {}),
       client,
       config,
       runId,

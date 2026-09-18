@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { runCli } from "../src/cli.js";
-import { splitLines } from "../src/lines.js";
+import { joinLines, splitLines } from "../src/lines.js";
+import type { Line } from "../src/lines.js";
 import { RunStore } from "../src/store.js";
 import { VERSION } from "../src/version.js";
 import { homeEnv, makeHome, removeHome, testIo, writeConfig } from "./helpers/env.js";
@@ -28,6 +29,73 @@ function node(script: string): string[] {
 async function runIds(): Promise<string[]> {
   const names = await readdir(join(home, "runs"));
   return names.filter((name) => name.endsWith(".log")).map((name) => name.slice(0, -4));
+}
+
+const COLLAPSE_MARKER = /^\[jevprune: (\d+) lines dropped, run [a-z0-9]+-[a-f0-9]{4}, lines (\d+)-(\d+)\]$/;
+
+interface Marker {
+  readonly count: number;
+  readonly from: number;
+  readonly to: number;
+}
+
+interface TruncatedRun {
+  readonly id: string;
+  readonly printed: Line[];
+  readonly footer: string;
+  readonly log: Line[];
+}
+
+function markersOf(printed: readonly Line[]): Marker[] {
+  const markers: Marker[] = [];
+  for (const line of printed) {
+    const match = COLLAPSE_MARKER.exec(line.text);
+    if (match === null) continue;
+    markers.push({ count: Number(match[1]), from: Number(match[2]), to: Number(match[3]) });
+  }
+  return markers;
+}
+
+async function truncatedRun(maxPruneBytes: number, count: number): Promise<TruncatedRun> {
+  await writeConfig(home, { fastPathLines: 0, maxPruneBytes, headLines: 20, tailLines: 10 });
+  const io = testIo(homeEnv(home));
+  const script = `const pad = 'y'.repeat(80); for (let i = 1; i <= ${String(count)}; i += 1) process.stdout.write('line ' + i + ' ' + pad + '\\n');`;
+  expect(await runCli(["run", "--task", "read the last lines", "--", ...node(script)], io)).toBe(0);
+
+  const [id] = await runIds();
+  expect(id).toBeDefined();
+  const printed = splitLines(io.out());
+  const footer = printed.pop();
+  return {
+    id: String(id),
+    printed,
+    footer: footer?.text ?? "",
+    log: splitLines((await new RunStore({ home }).readRun(String(id))).text),
+  };
+}
+
+async function expectRunLogNumbering(run: TruncatedRun): Promise<void> {
+  let n = 0;
+  for (const line of run.printed) {
+    const match = COLLAPSE_MARKER.exec(line.text);
+    if (match !== null) {
+      expect(Number(match[2])).toBe(n + 1);
+      n = Number(match[3]);
+      continue;
+    }
+    n += 1;
+    const logged = run.log[n - 1];
+    expect(line.text + line.terminator).toBe(`${logged?.text ?? ""}${logged?.terminator ?? ""}`);
+  }
+  expect(n).toBe(run.log.length);
+
+  for (const marker of markersOf(run.printed)) {
+    expect(marker.to - marker.from + 1).toBe(marker.count);
+    const shown = testIo(homeEnv(home));
+    expect(await runCli(["show", run.id, "--lines", `${String(marker.from)}-${String(marker.to)}`], shown)).toBe(0);
+    expect(splitLines(shown.out())).toHaveLength(marker.count);
+    expect(shown.out()).toBe(joinLines(run.log.slice(marker.from - 1, marker.to)));
+  }
 }
 
 describe("cli", () => {
@@ -132,6 +200,24 @@ describe("cli run", () => {
     expect(record.meta?.mode).toBe("fallback");
     expect(record.meta?.lines).toBe(200);
     expect(record.meta?.fallbackReason).toBe("output over 1024 bytes");
+  });
+
+  it("numbers every printed line and every marker of a truncated capture by the run log", async () => {
+    const run = await truncatedRun(65_536, 6_000);
+    expect(run.footer).toContain("jevprune: fallback (no Jev: output over 65536 bytes), 6,000 → ");
+    expect(run.log).toHaveLength(6_000);
+    const [marker] = markersOf(run.printed);
+    expect(markersOf(run.printed)).toHaveLength(1);
+    expect(marker?.from).toBe(21);
+    expect(marker?.count).toBeGreaterThan(5_000);
+    await expectRunLogNumbering(run);
+  });
+
+  it("covers the lines before the tail ring when the head holds no complete line", async () => {
+    const run = await truncatedRun(64, 6_000);
+    const [marker] = markersOf(run.printed);
+    expect(marker?.from).toBe(1);
+    await expectRunLogNumbering(run);
   });
 
   it("reports the run store as unavailable in the footer", async () => {

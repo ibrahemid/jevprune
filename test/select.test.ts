@@ -249,13 +249,13 @@ describe("selectLines", () => {
     }
   });
 
-  it("falls back on a truncated capture and reports the runner's line count", async () => {
+  it("falls back on a truncated capture and numbers the tail from the end of the run log", async () => {
     const client = new FakeJevClient({ noul: () => 0.9 });
     const base = {
       text: buildLog(),
       task: "fix the failing auth test",
       command: "pnpm test",
-      oversize: { lines: 51_234 },
+      oversize: { lines: 51_234, headSegmentLines: 60 },
       client,
       config: config({ headLines: 5, tailLines: 4, maxPruneBytes: 1_048_576 }),
       runId: "abcd-0009",
@@ -266,6 +266,28 @@ describe("selectLines", () => {
     expect(result.linesIn).toBe(51_234);
     expect(result.linesOut).toBe(12);
     expect(client.calls).toEqual([]);
+
+    expect(result.decisions.get(5)).toEqual({ keep: true, reason: "head" });
+    expect(result.decisions.get(51_223)).toEqual({ keep: true, reason: "signature" });
+    expect(result.decisions.get(51_234)).toEqual({ keep: true, reason: "tail" });
+    expect(result.dropped).toEqual([
+      { from: 6, to: 51_222, count: 51_217 },
+      { from: 51_224, to: 51_230, count: 7 },
+    ]);
+    expect(result.kept).toContain("[1/90] fetching package-1 ... done");
+    expect(result.kept).toContain("[jevprune: 51217 lines dropped, run abcd-0009, lines 6-51222]");
+    expect(result.kept).toContain("AssertionError: expected 401 to be 200");
+    expect(result.kept).toContain("cleanup step 10 complete");
+
+    const covered = new Set<number>();
+    for (const [n, decision] of result.decisions) if (decision.keep) covered.add(n);
+    for (const range of result.dropped) {
+      for (let n = range.from; n <= range.to; n += 1) {
+        expect(covered.has(n)).toBe(false);
+        covered.add(n);
+      }
+    }
+    expect(covered.size).toBe(51_234);
 
     const failed = await selectLines({ ...base, exitCode: 1 });
     expect(failed.mode).toBe("fallback");

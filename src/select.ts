@@ -16,6 +16,11 @@ import { mergeDecisions } from "./merge.js";
 import type { Line } from "./lines.js";
 import type { Decision, DroppedRange, SelectionMode } from "./types.js";
 
+export interface OversizeCapture {
+  readonly lines: number;
+  readonly headSegmentLines: number;
+}
+
 export const UNAUTHORIZED_REASON = "unauthorized (401)";
 
 export const RUBRIC =
@@ -29,7 +34,7 @@ export interface SelectInput {
   readonly command: string;
   readonly exitCode?: number | null;
   readonly interrupted?: boolean;
-  readonly oversize?: { readonly lines: number };
+  readonly oversize?: OversizeCapture;
   readonly client: JevClient | null;
   readonly config: ResolvedConfig;
   readonly runId: string;
@@ -64,6 +69,16 @@ interface FallbackInput {
   readonly linesIn: number;
 }
 
+interface FallbackMerge {
+  readonly lines: readonly Line[];
+  readonly decisions: Map<number, Decision>;
+  readonly input: SelectInput;
+  readonly reason: string;
+  readonly bytesIn: number;
+  readonly linesIn: number;
+  readonly totalLines?: number;
+}
+
 interface JevVerdicts {
   readonly windows: number;
   readonly jevRequests: number;
@@ -81,14 +96,7 @@ export async function selectLines(input: SelectInput): Promise<SelectionResult> 
   const bytesIn = Buffer.byteLength(input.text);
 
   if (input.oversize !== undefined) {
-    return fallbackSelection({
-      lines,
-      keeps: keepsOf(lines, input.config),
-      input,
-      reason: `output over ${String(input.config.maxPruneBytes)} bytes`,
-      bytesIn,
-      linesIn: input.oversize.lines,
-    });
+    return oversizeSelection(input, input.oversize, lines, bytesIn);
   }
   if ((input.exitCode !== undefined && input.exitCode !== null && input.exitCode !== 0) || input.interrupted === true) {
     return everyLine(lines, "passthrough", input.text, bytesIn);
@@ -216,18 +224,70 @@ function keepsOf(lines: readonly Line[], config: ResolvedConfig): Map<number, Ke
 
 function fallbackSelection(fallback: FallbackInput): SelectionResult {
   const { lines, keeps, input } = fallback;
-  const headLines = Math.max(0, Math.trunc(input.config.headLines));
+  return fallbackResult({
+    lines,
+    decisions: fallbackDecisions(lines, keeps, input.config.headLines),
+    input,
+    reason: fallback.reason,
+    bytesIn: fallback.bytesIn,
+    linesIn: fallback.linesIn,
+  });
+}
+
+function oversizeSelection(
+  input: SelectInput,
+  oversize: OversizeCapture,
+  captured: readonly Line[],
+  bytesIn: number,
+): SelectionResult {
+  const headCount = Math.min(Math.max(0, Math.trunc(oversize.headSegmentLines)), captured.length);
+  const totalLines = Math.max(Math.trunc(oversize.lines), captured.length);
+  const tailFirst = totalLines - captured.length + headCount + 1;
+  const head = captured.slice(0, headCount);
+  const tail = renumber(captured.slice(headCount), tailFirst);
+
+  const contextLines = input.config.contextLines;
+  const keeps = computeKeeps(head, { tailLines: 0, contextLines });
+  const tailKeeps = computeKeeps(renumber(tail, 1), { tailLines: input.config.tailLines, contextLines });
+  for (const [n, reason] of tailKeeps) keeps.set(n + tailFirst - 1, reason);
+
+  const lines = [...head, ...tail];
+  return fallbackResult({
+    lines,
+    decisions: fallbackDecisions(lines, keeps, input.config.headLines),
+    input,
+    reason: `output over ${String(input.config.maxPruneBytes)} bytes`,
+    bytesIn,
+    linesIn: totalLines,
+    totalLines,
+  });
+}
+
+function fallbackDecisions(
+  lines: readonly Line[],
+  keeps: Map<number, KeepReason>,
+  headLines: number,
+): Map<number, Decision> {
+  const head = Math.max(0, Math.trunc(headLines));
   const decisions = new Map<number, Decision>();
   for (const line of lines) {
     const keep = keeps.get(line.n);
     if (keep !== undefined) decisions.set(line.n, { keep: true, reason: keep });
-    else if (line.n <= headLines) decisions.set(line.n, { keep: true, reason: "head" });
+    else if (line.n <= head) decisions.set(line.n, { keep: true, reason: "head" });
     else decisions.set(line.n, { keep: false, reason: "fallback" });
   }
+  return decisions;
+}
 
-  const { kept, dropped } = mergeDecisions(lines, decisions, {
-    minCollapseLines: input.config.minCollapseLines,
-    runId: input.runId,
+function renumber(lines: readonly Line[], from: number): Line[] {
+  return lines.map((line, index) => ({ ...line, n: from + index }));
+}
+
+function fallbackResult(fallback: FallbackMerge): SelectionResult {
+  const { kept, dropped } = mergeDecisions(fallback.lines, fallback.decisions, {
+    minCollapseLines: fallback.input.config.minCollapseLines,
+    runId: fallback.input.runId,
+    ...(fallback.totalLines !== undefined ? { totalLines: fallback.totalLines } : {}),
   });
   return {
     mode: "fallback",
@@ -241,7 +301,7 @@ function fallbackSelection(fallback: FallbackInput): SelectionResult {
     jevRequests: 0,
     jevInputTokens: 0,
     fallbackReason: fallback.reason,
-    decisions,
+    decisions: fallback.decisions,
   };
 }
 

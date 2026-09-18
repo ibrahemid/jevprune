@@ -18,6 +18,7 @@ export interface RunCapture {
   readonly text: string;
   readonly bytes: number;
   readonly lines: number;
+  readonly headSegmentLines: number;
   readonly exitCode: number;
   readonly signal: NodeJS.Signals | null;
   readonly interrupted: boolean;
@@ -62,11 +63,14 @@ class LineCounter {
     }
   }
 
+  get terminators(): number {
+    return this.#terminators + (this.#pendingCr ? 1 : 0);
+  }
+
   get lines(): number {
     if (this.#lastByte === undefined) return 0;
-    const terminators = this.#terminators + (this.#pendingCr ? 1 : 0);
     const endsWithTerminator = this.#lastByte === LF || this.#lastByte === CR;
-    return terminators + (endsWithTerminator ? 0 : 1);
+    return this.terminators + (endsWithTerminator ? 0 : 1);
   }
 }
 
@@ -74,6 +78,7 @@ class CaptureBuffer {
   readonly #maxBytes: number;
   readonly #head: Buffer[] = [];
   readonly #ring: Buffer[] = [];
+  readonly #headCounter = new LineCounter();
   #headBytes = 0;
   #ringBytes = 0;
   #oversize = false;
@@ -86,17 +91,24 @@ class CaptureBuffer {
     return this.#oversize;
   }
 
+  get headSegmentLines(): number {
+    return this.#oversize ? this.#headCounter.terminators : this.#headCounter.lines;
+  }
+
   push(chunk: Buffer): void {
     let rest = chunk;
     if (!this.#oversize) {
       const room = this.#maxBytes - this.#headBytes;
       if (rest.length <= room) {
         this.#head.push(rest);
+        this.#headCounter.push(rest);
         this.#headBytes += rest.length;
         return;
       }
       if (room > 0) {
-        this.#head.push(rest.subarray(0, room));
+        const head = rest.subarray(0, room);
+        this.#head.push(head);
+        this.#headCounter.push(head);
         this.#headBytes += room;
         rest = rest.subarray(room);
       }
@@ -187,6 +199,7 @@ export async function runCommand(input: RunCommandInput): Promise<RunCapture> {
     text: buffer.text(),
     bytes,
     lines: counter.lines,
+    headSegmentLines: buffer.headSegmentLines,
     exitCode: exitCodeOf(exit),
     signal: exit.signal,
     interrupted: receivedSignal || exit.signal !== null,
@@ -280,7 +293,7 @@ function trimToLastTerminator(buffer: Buffer): Buffer {
     const byte = buffer[index];
     if (byte === LF || byte === CR) return buffer.subarray(0, index + 1);
   }
-  return buffer;
+  return buffer.subarray(0, 0);
 }
 
 function trimToFirstLine(buffer: Buffer): Buffer {

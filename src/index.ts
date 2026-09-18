@@ -27,7 +27,7 @@ export type { MergeOptions, MergeResult } from "./merge.js";
 export { pruneOutput, pruneStream } from "./prune.js";
 export type { PruneInput, PruneResult, PruneStreamInput } from "./prune.js";
 export { RUBRIC, questionFor, selectLines } from "./select.js";
-export type { SelectInput, SelectionResult } from "./select.js";
+export type { OversizeCapture, SelectInput, SelectionResult } from "./select.js";
 export { RunStore, newRunId } from "./store.js";
 export type { GainEntry, GainTotals, RunMeta, RunRecord, RunWriter } from "./store.js";
 export { MAX_TASK_LENGTH, resolveTask } from "./task.js";
