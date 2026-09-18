@@ -111,9 +111,12 @@ export async function pruneStream(input: PruneStreamInput): Promise<PruneResult>
       capture.push(bytes);
       await sink.write(bytes);
     }
-  } finally {
+  } catch (error) {
     await sink.close();
+    await discardPartialRun(prepared.store, prepared.runId);
+    throw error;
   }
+  await sink.close();
 
   const output = capture.result();
   const failureCode = sink.failureCode();
@@ -277,6 +280,15 @@ async function openLogSink(store: RunStore | null, id: string): Promise<LogSink>
     },
     failureCode: () => (writer.failure === undefined ? undefined : (writer.failure.code ?? "failed")),
   };
+}
+
+async function discardPartialRun(store: RunStore | null, id: string): Promise<void> {
+  if (store === null) return;
+  try {
+    await store.discardRun(id);
+  } catch (error) {
+    if (!(error instanceof RunStoreError)) throw error;
+  }
 }
 
 function discardingSink(): LogSink {

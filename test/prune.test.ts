@@ -15,6 +15,10 @@ interface WindowState {
   readonly lines: readonly { readonly n: number; readonly text: string }[];
 }
 
+class SourceError extends Error {
+  override readonly name = "SourceError";
+}
+
 let home = "";
 
 beforeEach(async () => {
@@ -272,6 +276,26 @@ describe("pruneStream", () => {
     expect((await store.readRun(result.runId)).text).toBe(text);
     expectMarkerNumbering(result.kept, text);
     expect(splitLines(result.kept).at(-1)?.text).toBe("line 20000 " + "y".repeat(80));
+  });
+
+  it("discards the partial run and rethrows when the source stream fails", async () => {
+    const failure = new SourceError("source stopped at chunk 2");
+    function* failing(): Generator<Buffer> {
+      yield Buffer.from("line 1\n", "utf8");
+      throw failure;
+    }
+
+    await expect(
+      pruneStream({
+        stream: Readable.from(failing()),
+        task: "anything",
+        exitCode: 0,
+        client: new FakeJevClient(),
+        env: homeEnv(home),
+      }),
+    ).rejects.toBe(failure);
+
+    expect(await readdir(join(home, "runs"))).toEqual([]);
   });
 
   it("saves nothing but a ledger entry on the fast path", async () => {
