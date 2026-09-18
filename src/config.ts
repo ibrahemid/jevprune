@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
+import { DEFAULT_WINDOW_TOKENS } from "./core/index.js";
 import { ConfigError, errorCode, errorMessage } from "./errors.js";
 
 export interface RetentionConfig {
@@ -58,7 +59,7 @@ export const DEFAULT_CONFIG: Config = {
   headLines: 40,
   contextLines: 3,
   minCollapseLines: 3,
-  windowTokens: 25_000,
+  windowTokens: DEFAULT_WINDOW_TOKENS,
   windowTimeoutMs: 10_000,
   concurrency: 4,
   maxPruneBytes: 16_777_216,
