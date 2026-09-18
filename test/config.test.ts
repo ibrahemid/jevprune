@@ -35,6 +35,13 @@ describe("loadConfig", () => {
     const config = await loadConfig(homeEnv(home));
     expect(config).toEqual({ ...DEFAULT_CONFIG, home });
     expect(config.threshold).toBe(0.3);
+    expect(config.autoWrap).toBe(false);
+  });
+
+  it("enables autoWrap only when the file asks for it", async () => {
+    await writeConfig({ autoWrap: true });
+    const config = await loadConfig(homeEnv(home));
+    expect(config.autoWrap).toBe(true);
   });
 
   it("overrides only the keys present in the file", async () => {

@@ -18,7 +18,7 @@ import { homeEnv, makeHome, removeHome, testIo, writeConfig } from "./helpers/en
 const TRANSCRIPT = "/tmp/claude/transcript.jsonl";
 
 function config(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
-  return { ...DEFAULT_CONFIG, home: "/nonexistent", ...overrides };
+  return { ...DEFAULT_CONFIG, home: "/nonexistent", autoWrap: true, ...overrides };
 }
 
 function event(command: string, extra: Partial<PreToolUseInput> = {}): PreToolUseInput {
@@ -57,6 +57,11 @@ describe("planRewrite", () => {
 
   it("skips when autoWrap is off", () => {
     expect(rewriteOf("pnpm test", { autoWrap: false })).toBeNull();
+  });
+
+  it("skips under the shipped defaults", () => {
+    expect(DEFAULT_CONFIG.autoWrap).toBe(false);
+    expect(planRewrite(event("pnpm test"), { ...DEFAULT_CONFIG, home: "/nonexistent" })).toBeNull();
   });
 
   it("skips a background command", () => {
@@ -207,7 +212,8 @@ describe("cli hook", () => {
     await removeHome(home);
   });
 
-  it("rewrites the command read from stdin", async () => {
+  it("rewrites the command read from stdin when autoWrap is enabled", async () => {
+    await writeConfig(home, { autoWrap: true });
     const stdin = JSON.stringify({
       tool_name: "Bash",
       transcript_path: TRANSCRIPT,
@@ -226,6 +232,14 @@ describe("cli hook", () => {
 
   it("prints nothing for malformed stdin", async () => {
     const io = testIo(homeEnv(home), "{ not json");
+    expect(await runCli(["hook"], io)).toBe(0);
+    expect(io.out()).toBe("");
+    expect(io.err()).toBe("");
+  });
+
+  it("prints nothing without a config file", async () => {
+    const stdin = JSON.stringify({ tool_name: "Bash", tool_input: { command: "pnpm test" } });
+    const io = testIo(homeEnv(home), stdin);
     expect(await runCli(["hook"], io)).toBe(0);
     expect(io.out()).toBe("");
     expect(io.err()).toBe("");

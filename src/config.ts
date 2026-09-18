@@ -64,7 +64,7 @@ export const DEFAULT_CONFIG: Config = {
   concurrency: 4,
   maxPruneBytes: 16_777_216,
   retention: { maxRuns: 200, maxBytes: 268_435_456 },
-  autoWrap: true,
+  autoWrap: false,
   allowlist: DEFAULT_ALLOWLIST,
 };
 
