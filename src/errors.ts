@@ -66,6 +66,10 @@ export function errorCode(error: unknown): string | undefined {
   return typeof code === "string" ? code : undefined;
 }
 
+export function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : "Error";
+}
+
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;

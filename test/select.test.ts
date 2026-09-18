@@ -201,20 +201,35 @@ describe("selectLines", () => {
     }
   });
 
-  it("keeps everything with a reason when Jev is unavailable", async () => {
+  it("falls back to the keeps, the head and the tail when Jev is unavailable", async () => {
     const text = buildLog();
+    const lines = splitLines(text);
     const base = {
       text,
       task: "fix the failing auth test",
       command: "pnpm test",
       exitCode: 0,
-      config: config(),
+      config: config({ headLines: 5, tailLines: 4 }),
       runId: "abcd-0008",
     };
     const noKey = await selectLines({ ...base, client: null });
-    expect(noKey.mode).toBe("passthrough");
-    expect(noKey.kept).toBe(text);
+    expect(noKey.mode).toBe("fallback");
     expect(noKey.fallbackReason).toBe("no api key");
+    expect(noKey.linesIn).toBe(lines.length);
+    expect(noKey.linesOut).toBe(12);
+    expect(noKey.decisions.get(1)).toEqual({ keep: true, reason: "head" });
+    expect(noKey.decisions.get(50)).toEqual({ keep: false, reason: "fallback" });
+    expect(noKey.decisions.get(102)).toEqual({ keep: true, reason: "signature" });
+    expect(noKey.decisions.get(lines.length)).toEqual({ keep: true, reason: "tail" });
+    expect(noKey.kept).toContain("[1/90] fetching package-1 ... done");
+    expect(noKey.kept).toContain("AssertionError: expected 401 to be 200");
+    expect(noKey.kept).toContain("cleanup step 10 complete");
+    expect(noKey.kept).toContain("[jevprune: 96 lines dropped, run abcd-0008, lines 6-101]");
+    expect(noKey.kept).toContain("[jevprune: 7 lines dropped, run abcd-0008, lines 103-109]");
+    expect(noKey.dropped).toEqual([
+      { from: 6, to: 101, count: 96 },
+      { from: 103, to: 109, count: 7 },
+    ]);
 
     const cases: [Error, string][] = [
       [new JevTimeoutError(10, "too slow"), "timeout"],
@@ -228,9 +243,32 @@ describe("selectLines", () => {
     for (const [error, reason] of cases) {
       const client = new FakeJevClient({ failWith: () => error });
       const result = await selectLines({ ...base, client });
-      expect(result.mode, reason).toBe("passthrough");
-      expect(result.kept).toBe(text);
+      expect(result.mode, reason).toBe("fallback");
       expect(result.fallbackReason).toBe(reason);
+      expect(result.kept).toBe(noKey.kept);
     }
+  });
+
+  it("falls back on a truncated capture and reports the runner's line count", async () => {
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const base = {
+      text: buildLog(),
+      task: "fix the failing auth test",
+      command: "pnpm test",
+      oversize: { lines: 51_234 },
+      client,
+      config: config({ headLines: 5, tailLines: 4, maxPruneBytes: 1_048_576 }),
+      runId: "abcd-0009",
+    };
+    const result = await selectLines({ ...base, exitCode: 0 });
+    expect(result.mode).toBe("fallback");
+    expect(result.fallbackReason).toBe("output over 1048576 bytes");
+    expect(result.linesIn).toBe(51_234);
+    expect(result.linesOut).toBe(12);
+    expect(client.calls).toEqual([]);
+
+    const failed = await selectLines({ ...base, exitCode: 1 });
+    expect(failed.mode).toBe("fallback");
+    expect(failed.kept).toBe(result.kept);
   });
 });

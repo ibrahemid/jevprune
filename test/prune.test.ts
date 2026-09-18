@@ -101,13 +101,24 @@ describe("pruneOutput", () => {
     );
   });
 
-  it("keeps everything with a reason when there is no api key", async () => {
+  it("falls back to the keeps, the head and the tail when there is no api key", async () => {
     const text = buildLog();
-    const result = await pruneOutput({ text, task: "anything", exitCode: 0, env: homeEnv(home) });
-    expect(result.mode).toBe("passthrough");
+    const result = await pruneOutput({
+      text,
+      task: "anything",
+      exitCode: 0,
+      env: homeEnv(home),
+      config: { headLines: 5, tailLines: 4, contextLines: 0 },
+    });
+    expect(result.mode).toBe("fallback");
     expect(result.fallbackReason).toBe("no api key");
-    expect(result.kept).toBe(text);
-    expect(result.footer).toContain("lines passed through");
+    expect(result.linesIn).toBe(splitLines(text).length);
+    expect(result.linesOut).toBe(10);
+    expect(result.kept).toContain("[1/100] copying asset-1");
+    expect(result.kept).toContain("[cleanup] removing temp-20");
+    expect(result.kept).toContain(`lines dropped, run ${result.runId}, lines 6-117`);
+    expect(result.footer).toContain("fallback (no Jev: no api key)");
+    expect((await new RunStore({ home }).readRun(result.runId)).text).toBe(text);
   });
 
   it("saves nothing but a ledger entry on the fast path", async () => {

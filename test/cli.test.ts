@@ -1,9 +1,12 @@
 import { readFile, readdir, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { runCli } from "../src/cli.js";
+import { splitLines } from "../src/lines.js";
 import { RunStore } from "../src/store.js";
 import { VERSION } from "../src/version.js";
 import { homeEnv, makeHome, removeHome, testIo, writeConfig } from "./helpers/env.js";
@@ -81,14 +84,14 @@ describe("cli run", () => {
     const [id] = await runIds();
     expect(id).toBeDefined();
     expect(io.out()).toBe(
-      `line 1\nline 2\nline 3\njevprune: exit 0, 3 lines passed through, full output ${join(home, "runs", `${String(id)}.log`)}\n`,
+      `line 1\nline 2\nline 3\njevprune: fallback (no Jev: no api key), 3 → 3 lines, exit 0, full output ${join(home, "runs", `${String(id)}.log`)}\n`,
     );
     expect(io.err()).toBe("");
 
     const store = new RunStore({ home });
     const record = await store.readRun(String(id));
     expect(record.text).toBe("line 1\nline 2\nline 3\n");
-    expect(record.meta?.mode).toBe("passthrough");
+    expect(record.meta?.mode).toBe("fallback");
     expect(record.meta?.fallbackReason).toBe("no api key");
     expect(record.meta?.task).toBe("check the output");
     expect(record.meta?.exitCode).toBe(0);
@@ -110,6 +113,87 @@ describe("cli run", () => {
     const script = "process.stdout.write('kept 1\\nkept 2\\n'); process.exit(5);";
     expect(await runCli(["run", "--", ...node(script)], io)).toBe(5);
     expect(base.out()).toBe("kept 1\nkept 2\n");
+    expect(base.err()).toBe("jevprune: pruning failed (Error), output passed through\n");
+  });
+
+  it("falls back with the exact line count when the capture is truncated", async () => {
+    await writeConfig(home, { fastPathLines: 0, maxPruneBytes: 1024, headLines: 2, tailLines: 2 });
+    const io = testIo(homeEnv(home));
+    const script =
+      "for (let i = 1; i <= 200; i += 1) process.stdout.write('line ' + i + ' ' + 'y'.repeat(30) + '\\n');";
+    expect(await runCli(["run", "--task", "check the output", "--", ...node(script)], io)).toBe(0);
+
+    const [id] = await runIds();
+    expect(io.out()).toContain("jevprune: fallback (no Jev: output over 1024 bytes), 200 → ");
+    expect(io.out()).toContain(`full output ${join(home, "runs", `${String(id)}.log`)}`);
+
+    const record = await new RunStore({ home }).readRun(String(id));
+    expect(splitLines(record.text)).toHaveLength(200);
+    expect(record.meta?.mode).toBe("fallback");
+    expect(record.meta?.lines).toBe(200);
+    expect(record.meta?.fallbackReason).toBe("output over 1024 bytes");
+  });
+
+  it("reports the run store as unavailable in the footer", async () => {
+    await writeConfig(home, { fastPathLines: 0 });
+    await writeFile(join(home, "runs"), "", "utf8");
+    const io = testIo(homeEnv(home));
+    const script = "process.stdout.write('one\\ntwo\\n');";
+    expect(await runCli(["run", "--task", "check the output", "--", ...node(script)], io)).toBe(0);
+    expect(io.out()).toBe(
+      "one\ntwo\njevprune: fallback (no Jev: no api key), 2 → 2 lines, exit 0, run store unavailable (EEXIST)\n",
+    );
+  });
+
+  it("names a missing key once per home, and only in hook mode", async () => {
+    await writeConfig(home, { fastPathLines: 0 });
+    const script = "process.stdout.write('ok\\n');";
+
+    const plain = testIo(homeEnv(home));
+    expect(await runCli(["run", "--", ...node(script)], plain)).toBe(0);
+    expect(plain.err()).toBe("");
+
+    const first = testIo(homeEnv(home));
+    expect(await runCli(["run", "--hook", "--", ...node(script)], first)).toBe(0);
+    expect(first.err()).toBe("jevprune: TYPESAFE_API_KEY not set, using fallback\n");
+
+    const second = testIo(homeEnv(home));
+    expect(await runCli(["run", "--hook", "--", ...node(script)], second)).toBe(0);
+    expect(second.err()).toBe("");
+  });
+
+  it("names a rejected key every time in hook mode", async () => {
+    await writeConfig(home, { fastPathLines: 0, tailLines: 0, contextLines: 0, headLines: 1 });
+    const server = createServer((_request, response) => {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: "invalid api key" } }));
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const port = (server.address() as AddressInfo).port;
+    const env = {
+      ...homeEnv(home),
+      TYPESAFE_API_KEY: "test-key",
+      TYPESAFE_BASE_URL: `http://127.0.0.1:${String(port)}`,
+    };
+    try {
+      const script = "for (let i = 1; i <= 5; i += 1) process.stdout.write('line ' + i + '\\n');";
+      for (const attempt of [1, 2]) {
+        const io = testIo(env);
+        expect(await runCli(["run", "--hook", "--", ...node(script)], io)).toBe(0);
+        expect(io.err(), `attempt ${String(attempt)}`).toBe(
+          "jevprune: TYPESAFE_API_KEY rejected (401), using fallback\n",
+        );
+        expect(io.out()).toContain("jevprune: fallback (no Jev: unauthorized (401)), 5 → ");
+      }
+    } finally {
+      await new Promise<void>((resolve) => {
+        server.close(() => {
+          resolve();
+        });
+      });
+    }
   });
 
   it("rejects a threshold outside [0, 1]", async () => {
@@ -263,7 +347,7 @@ describe("cli select", () => {
 
     const [id] = await runIds();
     expect(io.out()).toBe(
-      `alpha\nbeta\njevprune: 2 lines passed through, full output ${join(home, "runs", `${String(id)}.log`)}\n`,
+      `alpha\nbeta\njevprune: fallback (no Jev: no api key), 2 → 2 lines, full output ${join(home, "runs", `${String(id)}.log`)}\n`,
     );
     expect(await readFile(join(home, "runs", `${String(id)}.log`), "utf8")).toBe("alpha\nbeta\n");
   });

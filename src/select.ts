@@ -10,10 +10,13 @@ import {
 } from "./core/index.js";
 import type { JevClient, JevState, NoulResult, WindowItem } from "./core/index.js";
 import { computeKeeps } from "./keeps.js";
+import type { KeepReason } from "./keeps.js";
 import { splitLines } from "./lines.js";
 import { mergeDecisions } from "./merge.js";
 import type { Line } from "./lines.js";
 import type { Decision, DroppedRange, SelectionMode } from "./types.js";
+
+export const UNAUTHORIZED_REASON = "unauthorized (401)";
 
 export const RUBRIC =
   "A line is needed when a developer acting on the task would want to read it: errors, failures, assertions, stack frames, diagnostics, timings or statuses that bear on the task, and the lines that give them meaning. Progress bars, download counters, repeated banners, unchanged status lines and routine success noise are not needed.";
@@ -26,6 +29,7 @@ export interface SelectInput {
   readonly command: string;
   readonly exitCode?: number | null;
   readonly interrupted?: boolean;
+  readonly oversize?: { readonly lines: number };
   readonly client: JevClient | null;
   readonly config: ResolvedConfig;
   readonly runId: string;
@@ -51,6 +55,15 @@ interface LineItem extends WindowItem {
   readonly n: number;
 }
 
+interface FallbackInput {
+  readonly lines: readonly Line[];
+  readonly keeps: Map<number, KeepReason>;
+  readonly input: SelectInput;
+  readonly reason: string;
+  readonly bytesIn: number;
+  readonly linesIn: number;
+}
+
 interface JevVerdicts {
   readonly windows: number;
   readonly jevRequests: number;
@@ -67,6 +80,16 @@ export async function selectLines(input: SelectInput): Promise<SelectionResult> 
   const lines = splitLines(input.text);
   const bytesIn = Buffer.byteLength(input.text);
 
+  if (input.oversize !== undefined) {
+    return fallbackSelection({
+      lines,
+      keeps: keepsOf(lines, input.config),
+      input,
+      reason: `output over ${String(input.config.maxPruneBytes)} bytes`,
+      bytesIn,
+      linesIn: input.oversize.lines,
+    });
+  }
   if ((input.exitCode !== undefined && input.exitCode !== null && input.exitCode !== 0) || input.interrupted === true) {
     return everyLine(lines, "passthrough", input.text, bytesIn);
   }
@@ -74,10 +97,7 @@ export async function selectLines(input: SelectInput): Promise<SelectionResult> 
     return everyLine(lines, "fast-path", input.text, bytesIn);
   }
 
-  const keeps = computeKeeps(lines, {
-    tailLines: input.config.tailLines,
-    contextLines: input.config.contextLines,
-  });
+  const keeps = keepsOf(lines, input.config);
   const decisions = new Map<number, Decision>();
   const candidates: LineItem[] = [];
   for (const line of lines) {
@@ -94,14 +114,21 @@ export async function selectLines(input: SelectInput): Promise<SelectionResult> 
   }
 
   if (input.client === null) {
-    return withReason(everyLine(lines, "passthrough", input.text, bytesIn), "no api key");
+    return fallbackSelection({ lines, keeps, input, reason: "no api key", bytesIn, linesIn: lines.length });
   }
 
   let verdicts: JevVerdicts;
   try {
     verdicts = await askJev(candidates, input, input.client);
   } catch (error) {
-    return withReason(everyLine(lines, "passthrough", input.text, bytesIn), fallbackReason(error));
+    return fallbackSelection({
+      lines,
+      keeps,
+      input,
+      reason: fallbackReason(error),
+      bytesIn,
+      linesIn: lines.length,
+    });
   }
 
   for (const n of verdicts.oversize) decisions.set(n, { keep: true, reason: "oversize" });
@@ -183,6 +210,41 @@ function stateOf(input: SelectInput, window: readonly LineItem[]): JevState {
   };
 }
 
+function keepsOf(lines: readonly Line[], config: ResolvedConfig): Map<number, KeepReason> {
+  return computeKeeps(lines, { tailLines: config.tailLines, contextLines: config.contextLines });
+}
+
+function fallbackSelection(fallback: FallbackInput): SelectionResult {
+  const { lines, keeps, input } = fallback;
+  const headLines = Math.max(0, Math.trunc(input.config.headLines));
+  const decisions = new Map<number, Decision>();
+  for (const line of lines) {
+    const keep = keeps.get(line.n);
+    if (keep !== undefined) decisions.set(line.n, { keep: true, reason: keep });
+    else if (line.n <= headLines) decisions.set(line.n, { keep: true, reason: "head" });
+    else decisions.set(line.n, { keep: false, reason: "fallback" });
+  }
+
+  const { kept, dropped } = mergeDecisions(lines, decisions, {
+    minCollapseLines: input.config.minCollapseLines,
+    runId: input.runId,
+  });
+  return {
+    mode: "fallback",
+    kept,
+    dropped,
+    linesIn: fallback.linesIn,
+    linesOut: splitLines(kept).length,
+    bytesIn: fallback.bytesIn,
+    bytesOut: Buffer.byteLength(kept),
+    windows: 0,
+    jevRequests: 0,
+    jevInputTokens: 0,
+    fallbackReason: fallback.reason,
+    decisions,
+  };
+}
+
 export function fallbackReason(error: unknown): string {
   if (error instanceof JevTimeoutError) return "timeout";
   if (error instanceof JevResponseError) return "invalid response";
@@ -193,7 +255,7 @@ export function fallbackReason(error: unknown): string {
       case 529:
         return "overloaded (529)";
       case 401:
-        return "unauthorized (401)";
+        return UNAUTHORIZED_REASON;
       case 400:
         return "bad request (400)";
       case undefined:
@@ -227,8 +289,4 @@ function everyLine(
     jevInputTokens: 0,
     decisions,
   };
-}
-
-function withReason(result: SelectionResult, reason: string): SelectionResult {
-  return { ...result, fallbackReason: reason };
 }

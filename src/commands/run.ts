@@ -1,10 +1,12 @@
 import { loadConfig } from "../config.js";
-import { UsageError } from "../errors.js";
+import { TYPESAFE_API_KEY_ENV } from "../core/index.js";
+import { UsageError, errorName } from "../errors.js";
 import { withFooter } from "../footer.js";
 import type { CliIo } from "../io.js";
+import { shouldAnnounceMissingKey } from "../notices.js";
 import { clientFromEnv, recordRun } from "../prune.js";
 import { runCommand } from "../runner.js";
-import { selectLines } from "../select.js";
+import { UNAUTHORIZED_REASON, selectLines } from "../select.js";
 import { RunStore, newRunId } from "../store.js";
 import { resolveTask } from "../task.js";
 
@@ -31,6 +33,11 @@ export async function runRun(options: RunOptions, io: CliIo): Promise<number> {
     command,
   });
 
+  const client = clientFromEnv(io.env);
+  if (options.hook === true && client === null && (await shouldAnnounceMissingKey(config.home))) {
+    await io.writeError(`jevprune: ${TYPESAFE_API_KEY_ENV} not set, using fallback\n`).catch(() => undefined);
+  }
+
   const capture = await runCommand({
     argv: options.argv,
     runId,
@@ -47,10 +54,14 @@ export async function runRun(options: RunOptions, io: CliIo): Promise<number> {
       command,
       exitCode: capture.exitCode,
       interrupted: capture.interrupted,
-      client: clientFromEnv(io.env),
+      ...(capture.oversize ? { oversize: { lines: capture.lines } } : {}),
+      client,
       config,
       runId,
     });
+    if (options.hook === true && selection.fallbackReason === UNAUTHORIZED_REASON) {
+      await io.writeError(`jevprune: ${TYPESAFE_API_KEY_ENV} rejected (401), using fallback\n`).catch(() => undefined);
+    }
     const { footer } = await recordRun({
       store,
       selection,
@@ -71,8 +82,11 @@ export async function runRun(options: RunOptions, io: CliIo): Promise<number> {
         : {}),
     });
     await io.write(withFooter(selection.kept, footer));
-  } catch {
+  } catch (error) {
     await io.write(capture.text).catch(() => undefined);
+    await io
+      .writeError(`jevprune: pruning failed (${errorName(error)}), output passed through\n`)
+      .catch(() => undefined);
   }
   return capture.exitCode;
 }
