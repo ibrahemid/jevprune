@@ -34,7 +34,7 @@ describe("loadConfig", () => {
   it("returns the defaults when no config file exists", async () => {
     const config = await loadConfig(homeEnv(home));
     expect(config).toEqual({ ...DEFAULT_CONFIG, home });
-    expect(config.threshold).toBe(0.25);
+    expect(config.threshold).toBe(0.3);
   });
 
   it("overrides only the keys present in the file", async () => {

@@ -53,7 +53,7 @@ export const DEFAULT_ALLOWLIST: readonly string[] = [
 ];
 
 export const DEFAULT_CONFIG: Config = {
-  threshold: 0.25,
+  threshold: 0.3,
   fastPathLines: 60,
   tailLines: 40,
   headLines: 40,
