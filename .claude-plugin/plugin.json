@@ -1,6 +1,6 @@
 {
   "name": "jevprune",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Adds a skill for running jevprune and recovering dropped ranges. Includes an optional Bash rewrite hook.",
   "author": {
     "name": "ibrahemid"

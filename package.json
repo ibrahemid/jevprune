@@ -1,6 +1,6 @@
 {
   "name": "jevprune",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Filter command output for coding agents using a task description.",
   "license": "MIT",
   "author": "ibrahemid",
