@@ -1,0 +1,11 @@
+{
+  "name": "jevprune",
+  "version": "0.1.0",
+  "description": "Wraps Bash commands so only the output lines that matter for the current task reach the transcript, with the full output saved on disk",
+  "author": {
+    "name": "ibrahemid"
+  },
+  "repository": "https://github.com/ibrahemid/jevprune",
+  "license": "MIT",
+  "keywords": ["claude-code", "bash", "output", "context", "tokens", "jev"]
+}

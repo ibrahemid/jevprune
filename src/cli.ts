@@ -5,6 +5,7 @@ import { parseArgs } from "node:util";
 import type { ParseArgsOptionsConfig } from "node:util";
 
 import { runGain } from "./commands/gain.js";
+import { runHook } from "./commands/hook.js";
 import { runRun } from "./commands/run.js";
 import { runSelect } from "./commands/select.js";
 import { runShow } from "./commands/show.js";
@@ -21,6 +22,7 @@ commands:
   select [--task <text>] [--threshold <n>] [--file <path>] [--command <text>]
   show <id> [--lines A-B]
   gain
+  hook
 
 options:
   --help
@@ -106,6 +108,10 @@ async function dispatch(argv: readonly string[], io: CliIo): Promise<number> {
     case "gain": {
       parse(args, {});
       return await runGain(io);
+    }
+    case "hook": {
+      parse(args, {});
+      return await runHook(io);
     }
     default:
       throw new UsageError(`unknown command "${command}"`);

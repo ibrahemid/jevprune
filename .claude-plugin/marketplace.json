@@ -1,0 +1,13 @@
+{
+  "name": "jevprune",
+  "owner": {
+    "name": "ibrahemid"
+  },
+  "plugins": [
+    {
+      "name": "jevprune",
+      "source": "./",
+      "description": "Wraps Bash commands so only the output lines that matter for the current task reach the transcript, with the full output saved on disk"
+    }
+  ]
+}
