@@ -62,7 +62,8 @@ export interface RunRecord {
 export interface RunWriter {
   readonly path: string;
   readonly failure: RunStoreError | undefined;
-  write(chunk: Buffer): void;
+  write(chunk: Buffer): boolean;
+  onDrain(listener: () => void): void;
   close(): Promise<void>;
 }
 
@@ -74,6 +75,7 @@ class FileRunWriter implements RunWriter {
   readonly path: string;
   readonly #handle: FileHandle;
   readonly #stream: Writable;
+  #waiting: (() => void)[] = [];
   #failure: RunStoreError | undefined;
   #closed = false;
 
@@ -83,6 +85,10 @@ class FileRunWriter implements RunWriter {
     this.#stream = stream;
     this.#stream.on("error", (error: unknown) => {
       this.#fail(error);
+      this.#release();
+    });
+    this.#stream.on("drain", () => {
+      this.#release();
     });
   }
 
@@ -90,13 +96,22 @@ class FileRunWriter implements RunWriter {
     return this.#failure;
   }
 
-  write(chunk: Buffer): void {
-    if (this.#closed || this.#failure !== undefined) return;
+  write(chunk: Buffer): boolean {
+    if (this.#closed || this.#failure !== undefined) return true;
     try {
-      this.#stream.write(chunk);
+      return this.#stream.write(chunk);
     } catch (error) {
       this.#fail(error);
+      return true;
     }
+  }
+
+  onDrain(listener: () => void): void {
+    if (this.#closed || this.#failure !== undefined) {
+      queueMicrotask(listener);
+      return;
+    }
+    this.#waiting.push(listener);
   }
 
   async close(): Promise<void> {
@@ -109,10 +124,17 @@ class FileRunWriter implements RunWriter {
       this.#fail(error);
       await this.#handle.close().catch(() => undefined);
     }
+    this.#release();
   }
 
   #fail(error: unknown): void {
     this.#failure ??= storeError(`run log ${this.path} could not be written`, error);
+  }
+
+  #release(): void {
+    const waiting = this.#waiting;
+    this.#waiting = [];
+    for (const listener of waiting) listener();
   }
 }
 

@@ -149,11 +149,21 @@ export async function runCommand(input: RunCommandInput): Promise<RunCapture> {
     ...(input.env !== undefined ? { env: input.env } : {}),
   });
 
+  let paused = false;
   const onChunk = (chunk: Buffer): void => {
     bytes += chunk.length;
     counter.push(chunk);
     buffer.push(chunk);
-    writer.write(chunk);
+    const ready = writer.write(chunk);
+    if (ready || paused) return;
+    paused = true;
+    child.stdout.pause();
+    child.stderr.pause();
+    writer.onDrain(() => {
+      paused = false;
+      child.stdout.resume();
+      child.stderr.resume();
+    });
   };
   child.stdout.on("data", onChunk);
   child.stderr.on("data", onChunk);
@@ -190,7 +200,10 @@ export async function runCommand(input: RunCommandInput): Promise<RunCapture> {
 const NO_WRITER: RunWriter = {
   path: "",
   failure: undefined,
-  write: () => undefined,
+  write: () => true,
+  onDrain: (listener) => {
+    queueMicrotask(listener);
+  },
   close: () => Promise.resolve(),
 };
 

@@ -126,6 +126,35 @@ describe("runCommand", () => {
     }
   });
 
+  it(
+    "holds the child back while the run log catches up and still writes every byte",
+    async () => {
+      const id = newRunId();
+      let peakRss = process.memoryUsage().rss;
+      const sampler = setInterval(() => {
+        peakRss = Math.max(peakRss, process.memoryUsage().rss);
+      }, 20);
+      let capture: Awaited<ReturnType<typeof runCommand>>;
+      try {
+        capture = await runCommand({
+          argv: node(
+            "const line = 'x'.repeat(1023) + '\\n'; for (let i = 0; i < 40960; i += 1) process.stdout.write(line);",
+          ),
+          runId: id,
+          store,
+          maxPruneBytes: 1_048_576,
+        });
+      } finally {
+        clearInterval(sampler);
+      }
+      expect(capture.bytes).toBe(41_943_040);
+      expect(capture.storeFailure).toBeUndefined();
+      expect((await stat(store.logPath(id))).size).toBe(41_943_040);
+      expect(peakRss).toBeLessThan(200 * 1024 * 1024);
+    },
+    120_000,
+  );
+
   it("keeps capturing when the run store cannot be opened", async () => {
     const blocker = join(home, "blocker");
     await writeFile(blocker, "", "utf8");
