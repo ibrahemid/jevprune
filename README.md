@@ -132,7 +132,7 @@ The hook leaves a command alone when it is already wrapped, runs in the backgrou
 | `windowTokens` | `25000` | estimated token budget per Jev request |
 | `windowTimeoutMs` | `10000` | per-window timeout before fallback |
 | `concurrency` | `4` | Jev requests in flight |
-| `maxPruneBytes` | `16777216` | bytes (16 MiB); larger input is pruned by head and tail, with no Jev request |
+| `maxPruneBytes` | `16777216` | bytes (16 MiB); larger input gets no Jev request, and is pruned by head and tail unless `run` passes a failed or non-UTF-8 command's output through |
 | `retention.maxRuns` | `200` | maximum saved runs before the oldest are deleted |
 | `retention.maxBytes` | `268435456` | maximum saved-run bytes (256 MiB) before the oldest are deleted |
 | `autoWrap` | `false` | when true, the plugin hook rewrites Bash commands |
@@ -198,7 +198,7 @@ The four modes: `fast-path` for output within `fastPathLines`, `passthrough` for
 - Needs an early-access TypeSafe key. Without one, every pruned run is the head-and-tail fallback.
 - Selection sends several requests for a long output and spends input tokens on the TypeSafe account that issued the key.
 - `run` takes an executable and arguments, no shell string. Use `bash -c '...'` for pipelines, which is what the rewrite hook does.
-- Input over 16 MiB is pruned by head and tail, with no Jev request. `run` still prints a failed command's output from its saved run log; when that log could not be saved, the footer says `full output was not saved` and the printed output is incomplete.
+- Input over 16 MiB gets no Jev request. It is pruned by head and tail, except in `run`, where a failed command's output, or output that is not valid UTF-8, is printed in full from the saved run log; when that log could not be saved, the footer says `full output was not saved` and the printed output is incomplete.
 - Output that is not valid UTF-8 passes through untouched.
 
 ## Alternatives
