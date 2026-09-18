@@ -32,8 +32,10 @@ function buildLog(): string {
   lines.push("");
   lines.push("auth: verifying session token for user 42");
   lines.push("auth: refreshing the login cookie");
+  for (let index = 1; index <= 3; index += 1) lines.push(`resolving dependency tree ${String(index)}`);
   lines.push("compiling src/server.ts took 812 ms");
   lines.push("compiling src/client.ts took 1204 ms");
+  for (let index = 1; index <= 3; index += 1) lines.push(`writing artifact ${String(index)}`);
   lines.push("AssertionError: expected 401 to be 200");
   lines.push("");
   for (let index = 1; index <= 10; index += 1) lines.push(`cleanup step ${String(index)} complete`);

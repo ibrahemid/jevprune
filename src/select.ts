@@ -10,7 +10,8 @@ import {
 } from "./core/index.js";
 import type { JevClient, JevState, NoulResult, WindowItem } from "./core/index.js";
 import { computeKeeps } from "./keeps.js";
-import { joinLines, splitLines } from "./lines.js";
+import { splitLines } from "./lines.js";
+import { mergeDecisions } from "./merge.js";
 import type { Line } from "./lines.js";
 import type { Decision, DroppedRange, SelectionMode } from "./types.js";
 
@@ -110,11 +111,14 @@ export async function selectLines(input: SelectInput): Promise<SelectionResult> 
     decisions.set(item.n, { keep: noul >= input.config.threshold, reason: "jev", noul });
   }
 
-  const kept = joinLines(lines.filter((line) => decisions.get(line.n)?.keep === true));
+  const { kept, dropped } = mergeDecisions(lines, decisions, {
+    minCollapseLines: input.config.minCollapseLines,
+    runId: input.runId,
+  });
   return {
     mode: "jev",
     kept,
-    dropped: droppedRanges(lines, decisions),
+    dropped,
     linesIn: lines.length,
     linesOut: splitLines(kept).length,
     bytesIn,
@@ -200,25 +204,6 @@ export function fallbackReason(error: unknown): string {
   }
   if (error instanceof Error) return error.name;
   return "unknown";
-}
-
-function droppedRanges(lines: readonly Line[], decisions: ReadonlyMap<number, Decision>): DroppedRange[] {
-  const dropped: DroppedRange[] = [];
-  let from: number | undefined;
-  let previous = 0;
-  for (const line of lines) {
-    if (decisions.get(line.n)?.keep === false) {
-      from ??= line.n;
-      previous = line.n;
-      continue;
-    }
-    if (from !== undefined) {
-      dropped.push({ from, to: previous, count: previous - from + 1 });
-      from = undefined;
-    }
-  }
-  if (from !== undefined) dropped.push({ from, to: previous, count: previous - from + 1 });
-  return dropped;
 }
 
 function everyLine(

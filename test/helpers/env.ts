@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -40,4 +40,8 @@ export function testIo(env: NodeJS.ProcessEnv, stdin = ""): TestIo {
 
 export function homeEnv(home: string): NodeJS.ProcessEnv {
   return { JEVPRUNE_HOME: home };
+}
+
+export async function writeConfig(home: string, config: Record<string, unknown>): Promise<void> {
+  await writeFile(join(home, "config.json"), JSON.stringify(config), "utf8");
 }

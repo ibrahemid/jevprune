@@ -117,6 +117,14 @@ export function parseConfig(raw: string, path: string): Config {
   };
 }
 
+export function parseThreshold(value: string): number {
+  const parsed = Number(value);
+  if (value.trim().length === 0 || !Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    throw new ConfigError(`--threshold must be a number in [0, 1], got ${describeValue(value)}`);
+  }
+  return parsed;
+}
+
 function readNumber(source: Record<string, unknown>, key: string, fallback: number, min: number, max: number): number {
   const value = source[key];
   if (value === undefined) return fallback;

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runCli } from "../src/cli.js";
 import { RunStore } from "../src/store.js";
 import { VERSION } from "../src/version.js";
-import { homeEnv, makeHome, removeHome, testIo } from "./helpers/env.js";
+import { homeEnv, makeHome, removeHome, testIo, writeConfig } from "./helpers/env.js";
 
 let home = "";
 
@@ -62,7 +62,18 @@ describe("cli", () => {
 });
 
 describe("cli run", () => {
+  it("prints short output unchanged and keeps no run log", async () => {
+    const io = testIo(homeEnv(home));
+    const script = "for (let i = 1; i <= 3; i += 1) process.stdout.write('line ' + i + '\\n');";
+    expect(await runCli(["run", "--task", "check the output", "--", ...node(script)], io)).toBe(0);
+    expect(io.out()).toBe("line 1\nline 2\nline 3\n");
+    expect(io.err()).toBe("");
+    expect(await runIds()).toEqual([]);
+    expect(await new RunStore({ home }).readGain()).toMatchObject({ runs: 1, linesIn: 3, linesOut: 3 });
+  });
+
   it("prints every captured line with a footer and saves the run", async () => {
+    await writeConfig(home, { fastPathLines: 0 });
     const io = testIo(homeEnv(home));
     const script = "for (let i = 1; i <= 3; i += 1) process.stdout.write('line ' + i + '\\n');";
     expect(await runCli(["run", "--task", "check the output", "--", ...node(script)], io)).toBe(0);
@@ -78,9 +89,33 @@ describe("cli run", () => {
     const record = await store.readRun(String(id));
     expect(record.text).toBe("line 1\nline 2\nline 3\n");
     expect(record.meta?.mode).toBe("passthrough");
+    expect(record.meta?.fallbackReason).toBe("no api key");
     expect(record.meta?.task).toBe("check the output");
     expect(record.meta?.exitCode).toBe(0);
     expect(await store.readGain()).toMatchObject({ runs: 1, linesIn: 3, linesOut: 3 });
+  });
+
+  it("prints the full captured output when pruning fails after the command ran", async () => {
+    await writeConfig(home, { fastPathLines: 0 });
+    const base = testIo(homeEnv(home));
+    let failed = false;
+    const io = {
+      ...base,
+      write: (text: string): Promise<void> => {
+        if (failed) return base.write(text);
+        failed = true;
+        return Promise.reject(new Error("stdout is gone"));
+      },
+    };
+    const script = "process.stdout.write('kept 1\\nkept 2\\n'); process.exit(5);";
+    expect(await runCli(["run", "--", ...node(script)], io)).toBe(5);
+    expect(base.out()).toBe("kept 1\nkept 2\n");
+  });
+
+  it("rejects a threshold outside [0, 1]", async () => {
+    const io = testIo(homeEnv(home));
+    expect(await runCli(["run", "--threshold", "2", "--", ...node("process.stdout.write('x\\n');")], io)).toBe(2);
+    expect(io.err()).toBe('jevprune: --threshold must be a number in [0, 1], got "2"\n');
   });
 
   it("exits with the command's code", async () => {
@@ -96,6 +131,7 @@ describe("cli run", () => {
   });
 
   it("takes the task from the transcript only with --hook", async () => {
+    await writeConfig(home, { fastPathLines: 0 });
     const transcript = join(home, "transcript.jsonl");
     await writeFile(transcript, JSON.stringify({ type: "user", message: { content: "fix the auth test" } }), "utf8");
     const io = testIo(homeEnv(home));
@@ -107,6 +143,7 @@ describe("cli run", () => {
   });
 
   it("falls back to the command as the task", async () => {
+    await writeConfig(home, { fastPathLines: 0 });
     const io = testIo(homeEnv(home));
     expect(await runCli(["run", "--", ...node("process.stdout.write('ok\\n');")], io)).toBe(0);
     const [id] = await runIds();
@@ -117,6 +154,7 @@ describe("cli run", () => {
 
 describe("cli select", () => {
   it("reads a file, prints it and saves the run", async () => {
+    await writeConfig(home, { fastPathLines: 0 });
     const path = join(home, "input.log");
     await writeFile(path, "alpha\nbeta\n", "utf8");
     const io = testIo(homeEnv(home));

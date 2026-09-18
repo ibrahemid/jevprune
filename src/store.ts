@@ -246,13 +246,13 @@ export class RunStore {
     let count = ids.length;
     for (const id of ids) {
       if (count <= this.#retention.maxRuns && total <= this.#retention.maxBytes) break;
-      await this.#removeRun(id);
+      await this.discardRun(id);
       total -= sizes.get(id) ?? 0;
       count -= 1;
     }
   }
 
-  async #removeRun(id: string): Promise<void> {
+  async discardRun(id: string): Promise<void> {
     for (const path of [this.logPath(id), this.metaPath(id)]) {
       try {
         await unlink(path);

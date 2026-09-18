@@ -5,6 +5,7 @@ import type { ParseArgsOptionsConfig } from "node:util";
 
 import { runRun } from "./commands/run.js";
 import { runSelect } from "./commands/select.js";
+import { parseThreshold } from "./config.js";
 import { ConfigError, JevpruneError, SpawnError, UsageError, errorMessage } from "./errors.js";
 import { processIo } from "./io.js";
 import type { CliIo } from "./io.js";
@@ -13,8 +14,8 @@ import { VERSION } from "./version.js";
 const HELP = `usage: jevprune <command> [options]
 
 commands:
-  run [--task <text>] [--hook] [--transcript <path>] -- <command> [args...]
-  select [--task <text>] [--file <path>] [--command <text>]
+  run [--task <text>] [--threshold <n>] [--hook] [--transcript <path>] -- <command> [args...]
+  select [--task <text>] [--threshold <n>] [--file <path>] [--command <text>]
 
 options:
   --help
@@ -53,6 +54,7 @@ async function dispatch(argv: readonly string[], io: CliIo): Promise<number> {
     case "run": {
       const values = parse(args, {
         task: { type: "string" },
+        threshold: { type: "string" },
         hook: { type: "boolean" },
         transcript: { type: "string" },
       });
@@ -60,6 +62,7 @@ async function dispatch(argv: readonly string[], io: CliIo): Promise<number> {
         {
           argv: rest,
           task: values.task,
+          threshold: values.threshold === undefined ? undefined : parseThreshold(values.threshold),
           hook: values.hook,
           transcript: values.transcript,
         },
@@ -69,10 +72,19 @@ async function dispatch(argv: readonly string[], io: CliIo): Promise<number> {
     case "select": {
       const values = parse(args, {
         task: { type: "string" },
+        threshold: { type: "string" },
         file: { type: "string" },
         command: { type: "string" },
       });
-      return await runSelect({ task: values.task, file: values.file, command: values.command }, io);
+      return await runSelect(
+        {
+          task: values.task,
+          threshold: values.threshold === undefined ? undefined : parseThreshold(values.threshold),
+          file: values.file,
+          command: values.command,
+        },
+        io,
+      );
     }
     default:
       throw new UsageError(`unknown command "${command}"`);
