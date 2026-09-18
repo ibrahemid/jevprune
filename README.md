@@ -41,7 +41,7 @@ jevprune gain
 
 `gain` totals locally recorded input and output lines and estimates the removed output tokens.
 
-The task comes from `--task`, else `JEVPRUNE_TASK`, else (inside the Claude Code plugin) the first prompt of the session, else the command itself.
+The task comes from `--task`, else `JEVPRUNE_TASK`, else, when the plugin rewrite hook supplies a transcript, the first prompt of the session, else the command itself.
 
 ## Demo
 
@@ -68,7 +68,7 @@ jevprune: 2,979 → 347 lines, full output ~/.jevprune/runs/mu6ln5j9-4968.log
 
 In these recorded runs, the auth task kept 54 of 2,979 lines and the timing task kept 347. Use the run ID and line range printed by a local run to retrieve omitted output while its log is retained.
 
-[Full demo output](docs/demo-output.md).
+[Full demo output](https://github.com/ibrahemid/jevprune/blob/main/docs/demo-output.md).
 
 ## How selection and recovery work
 
