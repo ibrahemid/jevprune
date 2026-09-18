@@ -47,10 +47,18 @@ function chunked(text: string, size: number): Buffer[] {
   return chunks;
 }
 
-function firstMarker(kept: string): { from: number; to: number } {
-  const match = /\[jevprune: \d+ lines dropped, run [a-z0-9]+-[a-f0-9]{4}, lines (\d+)-(\d+)\]/.exec(kept);
-  expect(match).not.toBeNull();
-  return { from: Number(match?.[1]), to: Number(match?.[2]) };
+function expectMarkerNumbering(kept: string, text: string): void {
+  const printed = splitLines(kept);
+  const source = splitLines(text);
+  let markers = 0;
+  for (const [index, line] of printed.entries()) {
+    const match = /\[jevprune: \d+ lines dropped, run [a-z0-9]+-[a-f0-9]{4}, lines (\d+)-(\d+)\]/.exec(line.text);
+    if (match === null) continue;
+    markers += 1;
+    expect(printed[index - 1]?.text).toBe(source[Number(match[1]) - 2]?.text);
+    expect(printed[index + 1]?.text).toBe(source[Number(match[2])]?.text);
+  }
+  expect(markers).toBeGreaterThan(0);
 }
 
 function keepMarked(): NoulScorer {
@@ -262,14 +270,8 @@ describe("pruneStream", () => {
 
     const store = new RunStore({ home });
     expect((await store.readRun(result.runId)).text).toBe(text);
-
-    const marker = firstMarker(result.kept);
-    expect(await store.readRunLines(result.runId, marker.from, marker.to)).toBe(
-      splitLines(text)
-        .slice(marker.from - 1, marker.to)
-        .map((line) => line.text + line.terminator)
-        .join(""),
-    );
+    expectMarkerNumbering(result.kept, text);
+    expect(splitLines(result.kept).at(-1)?.text).toBe("line 20000 " + "y".repeat(80));
   });
 
   it("saves nothing but a ledger entry on the fast path", async () => {
