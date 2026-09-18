@@ -242,7 +242,7 @@ result.mode;      // "fast-path" | "passthrough" | "jev" | "fallback"
 - Questions cost tokens too. A 3,000-line output is roughly 5 to 10 Jev requests depending on line length. Output tokens are free; input is billed by TypeSafe.
 - Needs an early-access TypeSafe key. Without one, every pruned run is the head-and-tail fallback.
 - `run` takes an executable and arguments, no shell string. Use `bash -c '...'` for pipelines, which is what the plugin does.
-- Outputs over 16 MiB are pruned by head and tail only.
+- Successful outputs over 16 MiB are pruned by head and tail only. Failed ones pass through in full.
 - Output that is not valid UTF-8 passes through untouched.
 - Everything jevprune saves stays under `~/.jevprune`. The task text is stored there with each run and nowhere else.
 
