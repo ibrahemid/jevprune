@@ -1,35 +1,45 @@
 # jevprune
 
-Keeps the lines of a command's output that matter for the task you are working on. Every kept line is printed exactly as the command wrote it. The full output is saved on disk and any dropped range can be printed back.
-
-Built for coding agents that run `npm test`, `cargo build`, `pytest` or `docker compose up` and push thousands of lines into their context. Line relevance is decided per line by [Jev](https://typesafe.ai), TypeSafe's model, with a fixed set of lines kept before Jev sees anything: the last 40 lines, every error signature, and the lines around it.
+jevprune filters long command output for coding agents using a task description. Retained lines keep their original text and order.
 
 ## Install
 
+Requires Node.js 22 or later. Jev selection also requires an early-access TypeSafe API key; without one, jevprune uses its documented fallback. Keys come from the waitlist at [typesafe.ai](https://typesafe.ai).
+
 ```sh
 npm install -g jevprune
-export TYPESAFE_API_KEY=...   # early-access key from typesafe.ai
+export TYPESAFE_API_KEY=...
 ```
 
-Claude Code plugin (wraps every Bash call automatically):
+Line relevance is decided per line by [Jev](https://typesafe.ai), TypeSafe's model. For Jev-selected runs, jevprune sends the task, command, and candidate output lines to the TypeSafe API. Blank lines and lines kept by deterministic rules are not sent.
 
-```sh
-claude plugin marketplace add ibrahemid/jevprune
-claude plugin install jevprune@jevprune
-```
+Plugin setup for Claude Code is a separate section below.
 
-The plugin calls the globally installed `jevprune` binary. Without the binary the hook does nothing and commands run as before. Without a key, commands are still wrapped and pruning falls back to head and tail.
-
-## Use
+## Quick start
 
 ```sh
 jevprune run --task "fix the failing auth test" -- npm test
-npm test 2>&1 | jevprune select --task "fix the failing auth test"
+```
+
+`run` executes the command with the given arguments (no shell), captures stdout and stderr in arrival order, prints the kept lines and exits with the command's exit code. For a pipeline or a redirect, use `-- bash -c '...'`.
+
+```sh
+jevprune select --task "find the slow build step" --file build.log
+```
+
+`select` prunes a local file or stdin and exits 0 when it processes the input successfully. It cannot read or preserve the producer's exit status, so use `run` when exit status matters.
+
+A pruned run ends with a footer that carries its run ID, and every collapse marker carries a line range. Print a range back:
+
+```sh
 jevprune show <run-id> --lines 120-531
+```
+
+```sh
 jevprune gain
 ```
 
-`run` executes the command with the given arguments (no shell), captures stdout and stderr in arrival order, prints the kept lines and exits with the command's exit code. `select` prunes a file or stdin. `show` prints an exact range of a saved run. `gain` sums what pruning saved so far on this machine.
+`gain` totals locally recorded input and output lines and estimates the removed output tokens.
 
 The task comes from `--task`, else `JEVPRUNE_TASK`, else (inside the Claude Code plugin) the first prompt of the session, else the command itself.
 
@@ -37,125 +47,33 @@ The task comes from `--task`, else `JEVPRUNE_TASK`, else (inside the Claude Code
 
 ![jevprune demo](docs/demo.gif)
 
-The fixture `test/fixtures/npm-test.log` is a 2,979-line vitest run with one failing test in `src/auth/login.test.ts` and a handful of slow tests. Same log, two tasks.
+The demo filters a saved test log, then retrieves omitted lines from its saved run. Run IDs are generated locally. The first task is a `select` run over a saved failure log; `run` passes a failed command's output through in full.
+
+Run the demo from a source checkout:
+
+```sh
+git clone https://github.com/ibrahemid/jevprune.git
+cd jevprune
+```
 
 ```sh
 jevprune select --task "fix the failing auth test" --command "npm test" --file test/fixtures/npm-test.log
-```
-
-```
-[jevprune: 53 lines dropped, run mu6ln7nv-3cb9, lines 1-53]
-stderr | src/auth/oauth.test.ts > oauth > paginates the sort order
-[jevprune: 456 lines dropped, run mu6ln7nv-3cb9, lines 55-510]
- ✓ src/auth/login.test.ts > login > merges a stale session 3ms
- ✓ src/auth/login.test.ts > login > clears unicode input 3ms
- ✓ src/auth/login.test.ts > login > ignores the previous state 2ms
- × src/auth/login.test.ts > login > rejects an expired session token 14ms
- ✓ src/auth/login.test.ts > login > updates the locale 3ms
- ✓ src/auth/login.test.ts > login > keeps the default value 3ms
- ✓ src/auth/login.test.ts > login > computes a network failure 18ms
-[jevprune: 724 lines dropped, run mu6ln7nv-3cb9, lines 518-1241]
-stderr | src/notifications/push.test.ts > push > paginates duplicate entries
-Warning: An update to Form inside a test was not wrapped in act(...).
-[jevprune: 1696 lines dropped, run mu6ln7nv-3cb9, lines 1244-2939]
- ✓ src/components/toast.test.ts > toast > restores a stale session 5ms
- ✓ src/components/toast.test.ts > toast > ignores a negative quantity 9ms
- ✓ src/components/toast.test.ts > toast > emits an empty input 9ms
- ✓ src/components/toast.test.ts > toast > emits an unknown id 12ms
- ✓ src/components/toast.test.ts > toast > formats the previous state 1ms
- ✓ src/components/toast.test.ts > toast > filters the cached result 4ms
- ✓ src/components/toast.test.ts > toast > ignores a network failure 18ms
- ✓ src/components/toast.test.ts > toast > clears a large payload 18ms
- ✓ src/components/toast.test.ts > toast > merges a partial update 0ms
- ✓ src/components/toast.test.ts > toast > clears leading whitespace 7ms
- ✓ src/components/toast.test.ts > toast > filters a stale session 25ms
- ✓ src/components/toast.test.ts > toast > returns a negative quantity 12ms
-
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
-
- FAIL  src/auth/login.test.ts > login > rejects an expired session token
-AssertionError: expected 200 to be 401 // Object.is equality
-
-- Expected
-+ Received
-
-- 401
-+ 200
-
- ❯ src/auth/login.test.ts:88:29
-     86|     const response = await login({ token: expiredToken });
-     87| 
-     88|     expect(response.status).toBe(401);
-       |                             ^
-     89|     expect(response.body.error).toBe("session expired");
-     90|   });
-
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
-
-
- Test Files  1 failed | 94 passed (95)
-      Tests  1 failed | 2914 passed (2915)
-   Start at  09:12:04
-   Duration  41.20s (transform 4.11s, setup 1.62s, collect 12.30s, tests 33.94s, environment 9.81s)
-
-jevprune: 2,979 → 54 lines, full output ~/.jevprune/runs/mu6ln7nv-3cb9.log
-```
-
-```sh
 jevprune select --task "why is the build slow" --command "npm test" --file test/fixtures/npm-test.log
 ```
 
-Lines 53 to 78 of the 347 it printed, and the footer:
-
 ```
- ✓ src/billing/refunds.test.ts > refunds > rejects a negative quantity 12ms
- ✓ src/billing/refunds.test.ts > refunds > clears a stale session 1170ms
-[jevprune: 4 lines dropped, run mu6ln5j9-4968, lines 844-847]
- ✓ src/billing/refunds.test.ts > refunds > keeps an empty input 1282ms
- ✓ src/billing/refunds.test.ts > refunds > updates a trailing slash 1083ms
- ✓ src/billing/refunds.test.ts > refunds > ignores an empty input 2ms
- ✓ src/billing/refunds.test.ts > refunds > sorts an expired token 7ms
- ✓ src/billing/refunds.test.ts > refunds > sorts a missing field 2216ms
- ✓ src/billing/refunds.test.ts > refunds > renders a network failure 25ms
- ✓ src/billing/refunds.test.ts > refunds > parses an expired token 1904ms
- ✓ src/billing/refunds.test.ts > refunds > merges an empty input 7ms
- ✓ src/billing/refunds.test.ts > refunds > parses the sort order 1013ms
-[jevprune: 9 lines dropped, run mu6ln5j9-4968, lines 857-865]
- ✓ src/hooks/use-form.test.ts > use-form > keeps a network failure 1610ms
- ✓ src/hooks/use-form.test.ts > use-form > paginates a partial update 2095ms
- ✓ src/hooks/use-form.test.ts > use-form > keeps the cached result 2512ms
- ✓ src/hooks/use-form.test.ts > use-form > parses the locale 466ms
- ✓ src/hooks/use-form.test.ts > use-form > updates a stale session 2ms
- ✓ src/hooks/use-form.test.ts > use-form > merges a negative quantity 1ms
- ✓ src/hooks/use-form.test.ts > use-form > restores an empty input 2073ms
- ✓ src/hooks/use-form.test.ts > use-form > filters a missing field 2203ms
-[jevprune: 4 lines dropped, run mu6ln5j9-4968, lines 874-877]
- ✓ src/hooks/use-form.test.ts > use-form > paginates the previous state 483ms
-[jevprune: 8 lines dropped, run mu6ln5j9-4968, lines 879-886]
- ✓ src/hooks/use-form.test.ts > use-form > validates a large payload 1372ms
-[jevprune: 6 lines dropped, run mu6ln5j9-4968, lines 888-893]
-```
-
-```
+jevprune: 2,979 → 54 lines, full output ~/.jevprune/runs/mu6ln7nv-3cb9.log
 jevprune: 2,979 → 347 lines, full output ~/.jevprune/runs/mu6ln5j9-4968.log
 ```
 
-The first task keeps the failure block and the auth lines around it. The second keeps the timing lines instead. Neither view rewrote a line. A dropped section comes back exactly:
+In these recorded runs, the auth task kept 54 of 2,979 lines and the timing task kept 347. Use the run ID and line range printed by a local run to retrieve omitted output while its log is retained.
 
-```sh
-jevprune show mu6ln7nv-3cb9 --lines 55-57
-```
+[Full demo output](docs/demo-output.md).
 
-```
-[deprecation] `fetchJson` is deprecated, use `http.get` instead
-
- ✓ src/api/errors.test.ts > errors > merges the sort order 3ms
-```
-
-## What is kept
+## How selection and recovery work
 
 1. 60 lines or fewer: everything, untouched, no request made.
-2. The command failed (non-zero exit or signal): everything, untouched. Failure output is evidence and is never pruned.
+2. `run` passes through all output when its command exits non-zero or receives a signal. Failure output is evidence and is never pruned. `select` does not know the producer's exit status.
 3. Otherwise, before Jev: the last 40 lines, every line matching an error signature (`FAIL`, `error:`, `AssertionError`, `Traceback`, stack frames, `exited with code`, and similar), and the 3 lines on each side of it. Repeated identical signature lines count once.
 4. The remaining lines go to Jev in windows, one yes/no question per line: is this line needed for the task? Lines scoring at or above the threshold (default 0.3) are kept.
 5. Dropped runs shorter than 3 lines are kept. Longer ones collapse into one marker:
@@ -170,27 +88,30 @@ The last line of the output is the footer:
 jevprune: 3,104 → 88 lines, exit 0, full output ~/.jevprune/runs/m1xk2p7a-3f9c.log
 ```
 
-## The exact-text guarantee
+jevprune preserves every retained command line byte-for-byte and in its original order. It inserts only collapse markers and a footer.
 
-jevprune never rewrites, summarizes or reorders a line. Every line it prints is byte-identical to a line the command wrote, in the original order. The only text it adds is the collapse marker and the footer. The full output is on disk before any decision is made, and `jevprune show <id> --lines A-B` prints any range back exactly.
-
-This is not lossless. A dropped line may have mattered. Retained text is exact; dropped text is recoverable; a wrong drop is possible. When a line you expect is missing, run `show` on the marker's range before concluding it is absent.
-
-## Fallback
+A dropped line may have mattered. When a line you expect is missing, run `show` on the marker's range before concluding it is absent. When the footer includes `full output <path>`, `jevprune show <id> --lines A-B` prints that saved range exactly. If the footer says `full output was not saved`, dropped ranges cannot be recovered. Retention deletes the oldest saved runs once either limit in the configuration table is reached, so an older run can become unavailable.
 
 No key, a rejected key, a rate limit, an outage, a timeout or a malformed answer never fails the command. jevprune keeps the deterministic set plus the first 40 and last 40 lines and says so in the footer:
 
 ```
-jevprune: fallback (no Jev: timeout), 3,104 → 83 lines, exit 0, full output ~/.jevprune/runs/<id>.log
+jevprune: fallback (Jev unavailable: timeout), 3,104 → 83 lines, exit 0, full output ~/.jevprune/runs/<id>.log
 ```
 
 ## Claude Code plugin
 
-A `PreToolUse` hook on `Bash` rewrites the command to `jevprune run --hook --transcript <path> -- bash -c '<command>'`. `bash -c` keeps pipelines, redirects and quoting as the agent wrote them; jevprune only owns capture and selection.
+```sh
+claude plugin marketplace add ibrahemid/jevprune
+claude plugin install jevprune@jevprune
+```
+
+The plugin bundles a skill and an optional Bash rewrite hook. Both call the globally installed `jevprune` binary. Without the binary, commands run as before.
+
+The skill is the default path. It tells the agent to call `jevprune run --task "<task>" -- <command>` itself, so the command that runs is the command the agent wrote and the user approved, and nothing is rewritten behind the permission rules. That command is still a different command: `Bash(npm test:*)` does not match `jevprune run --task ... -- npm test`, so a wrapped run is approved under its own rule. A rule like `Bash(jevprune run:*)` approves any command run through the wrapper.
+
+The rewrite hook is off by default. Set `"autoWrap": true` in `~/.jevprune/config.json` to turn it on. A `PreToolUse` hook then rewrites the command to `jevprune run --hook --transcript <path> -- bash -c '<command>'`. `bash -c` keeps pipelines, redirects and quoting as the agent wrote them; jevprune only owns capture and selection. Permission rules are matched against the rewritten command, so rules such as `Bash(npm test:*)` stop matching: an interactive session prompts for each wrapped command, and a headless run can be denied.
 
 The hook leaves a command alone when it is already wrapped, runs in the background, ends with `&`, changes shell state (`cd`, `export`, `source`, `.`, `unset`, `alias`, `set`, `eval`, `exec`, `pushd`, `popd`), starts an interactive program (`vim`, `less`, `ssh`, `sudo`, `top`, `tmux`, `claude`, and similar), starts a REPL or shell with no arguments (`python`, `node`, `bash`, `psql`, `gh`), runs `docker exec` or `docker run` with a terminal flag, follows a file with `tail -f`, or starts with an allowlisted prefix (`cd`, `ls`, `pwd`, `echo`, `git status`, `git add`, `git commit`, `git log`, `git diff --stat`, `which`, `mkdir`, `touch`, `true`, `test`, `[`).
-
-Set `"autoWrap": false` in `~/.jevprune/config.json` to turn the rewrite off. The bundled skill then tells the agent to call `jevprune run` itself for long commands.
 
 ## Configuration
 
@@ -207,11 +128,13 @@ Set `"autoWrap": false` in `~/.jevprune/config.json` to turn the rewrite off. Th
 | `windowTokens` | `25000` | estimated token budget per Jev request |
 | `windowTimeoutMs` | `10000` | per-window timeout before fallback |
 | `concurrency` | `4` | Jev requests in flight |
-| `maxPruneBytes` | `16777216` | larger outputs use fallback on the head and tail |
-| `retention.maxRuns` | `200` | saved runs kept |
-| `retention.maxBytes` | `268435456` | total bytes of saved runs kept |
-| `autoWrap` | `true` | plugin rewrites Bash commands |
+| `maxPruneBytes` | `16777216` | bytes (16 MiB); larger successful outputs use fallback on the head and tail |
+| `retention.maxRuns` | `200` | maximum saved runs before the oldest are deleted |
+| `retention.maxBytes` | `268435456` | maximum saved-run bytes (256 MiB) before the oldest are deleted |
+| `autoWrap` | `false` | when true, the plugin hook rewrites Bash commands |
 | `allowlist` | see above | command prefixes the plugin never wraps |
+
+Either retention limit can delete a run that a marker still refers to.
 
 Environment: `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `JEVPRUNE_TASK`, `JEVPRUNE_HOME` (default `~/.jevprune`).
 
@@ -219,8 +142,17 @@ The defaults were set on real outputs from one machine (a vitest run, a Next.js 
 
 ## Library
 
+A global CLI install does not make the import available to a project, so install it there:
+
+```sh
+npm install jevprune
+```
+
 ```ts
+import { readFile } from "node:fs/promises";
 import { pruneOutput } from "jevprune";
+
+const output = await readFile("build.log", "utf8");
 
 const result = await pruneOutput({
   text: output,
@@ -228,29 +160,48 @@ const result = await pruneOutput({
   command: "npm test",
   exitCode: 0,
 });
-result.kept;      // exact retained text with collapse markers
-result.dropped;   // [{ from, to, count }]
-result.runId;     // for `jevprune show`
-result.mode;      // "fast-path" | "passthrough" | "jev" | "fallback"
+
+result.kept;           // exact retained text with collapse markers
+result.dropped;        // [{ from, to, count }]
+result.runId;          // selection identifier
+result.logPath;        // defined only when a recoverable run log was saved
+result.footer;         // status text, separate from kept
+result.mode;           // "fast-path" | "passthrough" | "jev" | "fallback"
+result.linesIn;        // lines read
+result.linesOut;       // lines in kept
+result.fallbackReason; // defined only in fallback mode
 ```
 
-`pruneStream` takes a readable stream instead of `text`. Pass `client` to supply your own Jev client (a `FakeJevClient` is exported for tests) and `save: false` to skip the run store.
+| input | effect |
+|---|---|
+| `text` | the output to prune |
+| `task` | the task the kept lines have to serve |
+| `command` | supplies selection context |
+| `exitCode` | a non-zero code passes the output through; omitted or `null` means unknown and can be pruned |
+| `client` | a supplied Jev client; `null` disables API selection, so eligible output uses the fallback |
+| `config` | overrides the loaded configuration values |
+| `env` | controls configuration and the default client |
+| `save` | `false` disables the run store |
 
-## Limits
+The four modes: `fast-path` for output within `fastPathLines`, `passthrough` for a failed command or non-UTF-8 output, `jev` for an API-selected run, `fallback` when Jev was unavailable. `fast-path` and `save: false` return a `runId` with no `logPath`, and `jevprune show` cannot read those runs.
 
-- Not lossless. See the guarantee above.
-- Questions cost tokens too. A 3,000-line output is roughly 5 to 10 Jev requests depending on line length. Output tokens are free; input is billed by TypeSafe.
+`pruneStream` has the same contract with `stream` replacing `text`. `FakeJevClient` is exported for tests.
+
+## Limits and data handling
+
+- Saved runs and metadata are stored under `~/.jevprune`. For Jev-selected runs, the task, command, and candidate output lines go to the TypeSafe API.
+- `select` exits 0 when it processes its input. It cannot report the exit status of the command that produced that input.
 - Needs an early-access TypeSafe key. Without one, every pruned run is the head-and-tail fallback.
-- `run` takes an executable and arguments, no shell string. Use `bash -c '...'` for pipelines, which is what the plugin does.
+- Selection sends several requests for a long output and spends input tokens on the TypeSafe account that issued the key.
+- `run` takes an executable and arguments, no shell string. Use `bash -c '...'` for pipelines, which is what the rewrite hook does.
 - Successful outputs over 16 MiB are pruned by head and tail only. Failed ones pass through in full.
 - Output that is not valid UTF-8 passes through untouched.
-- Everything jevprune saves stays under `~/.jevprune`. The task text is stored there with each run and nowhere else.
 
-## Neighbors
+## Alternatives
 
-- [fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction) replaces Claude Code's compaction summary with Jev decisions over the whole conversation. jevprune prunes one command's output at the moment it is produced, before it enters context. They compose. An open pull request there trims Bash output in 20-line chunks behind an early-access function-hook flag; jevprune scores single lines against the task, keeps error signatures with context before Jev is asked, runs on the documented `PreToolUse` hook, and works as a CLI and library outside Claude Code.
+- [fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction) selects conversation content during compaction. jevprune selects lines from each command as it finishes, and also works as a CLI or library. The tools can be used together.
 - [RTK](https://github.com/rtk-ai/rtk) filters output with rules written per tool. jevprune has no per-tool rules; the task decides.
-- [Squeez](https://github.com/KRLabsOrg/squeez) selects task-relevant lines with a local 2B model, in Python. jevprune does the same job through the TypeSafe API, with exact recall of dropped ranges and a run store.
+- [Squeez](https://github.com/KRLabsOrg/squeez) selects task-relevant lines with a 2B model, in Python, running locally or on a server. jevprune selects through the TypeSafe API and prints dropped ranges back from its run store.
 
 ## License
 

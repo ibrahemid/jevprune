@@ -1,7 +1,7 @@
 {
   "name": "jevprune",
   "version": "0.1.0",
-  "description": "Keep only the lines of a command's output that matter for the current task, decided per line by Jev, with the full output saved on disk",
+  "description": "Filter command output for coding agents using a task description.",
   "license": "MIT",
   "author": "ibrahemid",
   "repository": {

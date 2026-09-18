@@ -1,7 +1,7 @@
 {
   "name": "jevprune",
   "version": "0.1.0",
-  "description": "Wraps Bash commands so only the output lines that matter for the current task reach the transcript, with the full output saved on disk",
+  "description": "Adds a skill for running jevprune and recovering dropped ranges. Includes an optional Bash rewrite hook.",
   "author": {
     "name": "ibrahemid"
   },

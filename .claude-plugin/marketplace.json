@@ -3,12 +3,12 @@
   "owner": {
     "name": "ibrahemid"
   },
-  "description": "The jevprune plugin, which prunes Bash output to the lines that matter for the current task",
+  "description": "Adds a skill for running jevprune and recovering dropped ranges. Includes an optional Bash rewrite hook.",
   "plugins": [
     {
       "name": "jevprune",
       "source": "./",
-      "description": "Wraps Bash commands so only the output lines that matter for the current task reach the transcript, with the full output saved on disk"
+      "description": "Adds a skill for running jevprune and recovering dropped ranges. Includes an optional Bash rewrite hook."
     }
   ]
 }
