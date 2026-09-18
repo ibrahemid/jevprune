@@ -1,14 +1,15 @@
+import { OutputCapture, captureBytes } from "./capture.js";
+import type { CapturedOutput } from "./capture.js";
 import { loadConfig } from "./config.js";
 import type { Config, ResolvedConfig } from "./config.js";
 import { JevConfigError, createJevClientFromEnv } from "./core/index.js";
 import type { JevClient } from "./core/index.js";
 import { RunStoreError } from "./errors.js";
 import { formatFooter } from "./footer.js";
-import { readStream } from "./io.js";
 import { selectLines } from "./select.js";
 import type { SelectionResult } from "./select.js";
 import { RunStore, newRunId } from "./store.js";
-import type { RunMeta } from "./store.js";
+import type { RunMeta, RunWriter } from "./store.js";
 import type { DroppedRange, SelectionMode } from "./types.js";
 
 export interface PruneInput {
@@ -40,6 +41,31 @@ export interface PruneResult {
 
 export type RunMetaBase = Omit<RunMeta, "mode" | "linesOut" | "fallbackReason">;
 
+interface PruneContext {
+  readonly config: ResolvedConfig;
+  readonly client: JevClient | null;
+  readonly store: RunStore | null;
+  readonly runId: string;
+  readonly command: string;
+}
+
+interface SelectAndRecordInput {
+  readonly prepared: PruneContext;
+  readonly capture: CapturedOutput;
+  readonly text: string;
+  readonly task: string;
+  readonly exitCode: number | null;
+  readonly startedAt: string;
+  readonly logBytes?: Buffer;
+  readonly storeFailureCode?: string;
+}
+
+interface LogSink {
+  write(chunk: Buffer): Promise<void>;
+  close(): Promise<void>;
+  failureCode(): string | undefined;
+}
+
 export interface RecordRunInput {
   readonly store: RunStore | null;
   readonly selection: SelectionResult;
@@ -56,59 +82,50 @@ export interface RecordRunResult {
 }
 
 export async function pruneOutput(input: PruneInput): Promise<PruneResult> {
-  const env = input.env ?? process.env;
-  const config = mergeConfig(await loadConfig(env), input.config);
-  const client = input.client !== undefined ? input.client : clientFromEnv(env);
-  const runId = newRunId();
-  const command = input.command ?? "";
-  const store =
-    input.save === false ? null : new RunStore({ home: config.home, retention: config.retention });
+  const prepared = await prepare(input);
   const startedAt = new Date().toISOString();
+  const bytes = Buffer.from(input.text, "utf8");
+  const capture = captureBytes(bytes, prepared.config.maxPruneBytes);
 
-  const selection = await selectLines({
-    text: input.text,
+  return await selectAndRecord({
+    prepared,
+    capture,
+    text: capture.oversize ? capture.captured.toString("utf8") : input.text,
     task: input.task,
-    command,
     exitCode: input.exitCode ?? null,
-    client,
-    config,
-    runId,
+    startedAt,
+    logBytes: bytes,
   });
-
-  const recorded = await recordRun({
-    store,
-    selection,
-    logText: input.text,
-    meta: {
-      id: runId,
-      command,
-      argv: [],
-      startedAt,
-      endedAt: new Date().toISOString(),
-      exitCode: input.exitCode ?? null,
-      signal: null,
-      bytes: selection.bytesIn,
-      lines: selection.linesIn,
-      task: input.task,
-    },
-  });
-
-  return {
-    kept: selection.kept,
-    dropped: selection.dropped,
-    runId,
-    mode: selection.mode,
-    linesIn: selection.linesIn,
-    linesOut: selection.linesOut,
-    ...(selection.fallbackReason !== undefined ? { fallbackReason: selection.fallbackReason } : {}),
-    ...(recorded.logPath !== undefined ? { logPath: recorded.logPath } : {}),
-    footer: recorded.footer,
-  };
 }
 
 export async function pruneStream(input: PruneStreamInput): Promise<PruneResult> {
   const { stream, ...rest } = input;
-  return await pruneOutput({ ...rest, text: await readStream(stream) });
+  const prepared = await prepare(rest);
+  const startedAt = new Date().toISOString();
+  const sink = await openLogSink(prepared.store, prepared.runId);
+  const capture = new OutputCapture(prepared.config.maxPruneBytes);
+
+  try {
+    for await (const chunk of stream as AsyncIterable<Buffer | string>) {
+      const bytes = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk;
+      capture.push(bytes);
+      await sink.write(bytes);
+    }
+  } finally {
+    await sink.close();
+  }
+
+  const output = capture.result();
+  const failureCode = sink.failureCode();
+  return await selectAndRecord({
+    prepared,
+    capture: output,
+    text: output.captured.toString("utf8"),
+    task: input.task,
+    exitCode: input.exitCode ?? null,
+    startedAt,
+    ...(failureCode !== undefined ? { storeFailureCode: failureCode } : {}),
+  });
 }
 
 export async function recordRun(input: RecordRunInput): Promise<RecordRunResult> {
@@ -177,6 +194,97 @@ export function mergeConfig(base: ResolvedConfig, overrides: Partial<Config> | u
     if (overrides[key] !== undefined) Object.assign(defined, { [key]: overrides[key] });
   }
   return { ...base, ...defined };
+}
+
+async function prepare(input: Omit<PruneInput, "text">): Promise<PruneContext> {
+  const env = input.env ?? process.env;
+  const config = mergeConfig(await loadConfig(env), input.config);
+  return {
+    config,
+    client: input.client !== undefined ? input.client : clientFromEnv(env),
+    store: input.save === false ? null : new RunStore({ home: config.home, retention: config.retention }),
+    runId: newRunId(),
+    command: input.command ?? "",
+  };
+}
+
+async function selectAndRecord(input: SelectAndRecordInput): Promise<PruneResult> {
+  const { prepared, capture } = input;
+  const selection = await selectLines({
+    text: input.text,
+    task: input.task,
+    command: prepared.command,
+    exitCode: input.exitCode,
+    ...(capture.oversize
+      ? { oversize: { lines: capture.lines, headSegmentLines: capture.headSegmentLines } }
+      : {}),
+    client: prepared.client,
+    config: prepared.config,
+    runId: prepared.runId,
+  });
+
+  const recorded = await recordRun({
+    store: prepared.store,
+    selection,
+    ...(input.logBytes !== undefined ? { logBytes: input.logBytes } : {}),
+    ...(input.storeFailureCode !== undefined ? { storeFailureCode: input.storeFailureCode } : {}),
+    meta: {
+      id: prepared.runId,
+      command: prepared.command,
+      argv: [],
+      startedAt: input.startedAt,
+      endedAt: new Date().toISOString(),
+      exitCode: input.exitCode,
+      signal: null,
+      bytes: capture.bytes,
+      lines: selection.linesIn,
+      task: input.task,
+    },
+  });
+
+  return {
+    kept: selection.kept,
+    dropped: selection.dropped,
+    runId: prepared.runId,
+    mode: selection.mode,
+    linesIn: selection.linesIn,
+    linesOut: selection.linesOut,
+    ...(selection.fallbackReason !== undefined ? { fallbackReason: selection.fallbackReason } : {}),
+    ...(recorded.logPath !== undefined ? { logPath: recorded.logPath } : {}),
+    footer: recorded.footer,
+  };
+}
+
+async function openLogSink(store: RunStore | null, id: string): Promise<LogSink> {
+  if (store === null) return discardingSink();
+  let writer: RunWriter;
+  try {
+    writer = await store.openRun({ id });
+  } catch (error) {
+    if (!(error instanceof RunStoreError)) throw error;
+    const code = error.code ?? "failed";
+    return { ...discardingSink(), failureCode: () => code };
+  }
+  return {
+    write: async (chunk) => {
+      if (writer.write(chunk)) return;
+      await new Promise<void>((resolve) => {
+        writer.onDrain(resolve);
+      });
+    },
+    close: async () => {
+      await writer.close();
+    },
+    failureCode: () => (writer.failure === undefined ? undefined : (writer.failure.code ?? "failed")),
+  };
+}
+
+function discardingSink(): LogSink {
+  return {
+    write: () => Promise.resolve(),
+    close: () => Promise.resolve(),
+    failureCode: () => undefined,
+  };
 }
 
 async function writeLog(store: RunStore, id: string, bytes: Buffer): Promise<void> {

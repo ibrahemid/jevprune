@@ -539,6 +539,23 @@ describe("cli select", () => {
     expect(await readFile(join(home, "runs", `${String(id)}.log`), "utf8")).toBe("alpha\nbeta\n");
   });
 
+  it("falls back on the head and the tail when the file is over maxPruneBytes", async () => {
+    await writeConfig(home, { maxPruneBytes: 1024, headLines: 5, tailLines: 4, contextLines: 0 });
+    const path = join(home, "big.log");
+    const pad = "y".repeat(80);
+    const lines: string[] = [];
+    for (let index = 1; index <= 200; index += 1) lines.push(`line ${String(index)} ${pad}`);
+    const text = `${lines.join("\n")}\n`;
+    await writeFile(path, text, "utf8");
+
+    const io = testIo(homeEnv(home));
+    expect(await runCli(["select", "--task", "read it", "--file", path], io)).toBe(0);
+    expect(io.out()).toContain("jevprune: fallback (Jev unavailable: output over 1024 bytes), 200 → ");
+
+    const [id] = await runIds();
+    expect(await readFile(join(home, "runs", `${String(id)}.log`), "utf8")).toBe(text);
+  });
+
   it("reads stdin when no file is given", async () => {
     const io = testIo(homeEnv(home), "from stdin\n");
     expect(await runCli(["select"], io)).toBe(0);

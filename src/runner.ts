@@ -4,27 +4,20 @@ import { constants } from "node:os";
 import type { Readable } from "node:stream";
 
 import { isValidUtf8 } from "./bytes.js";
+import { OutputCapture } from "./capture.js";
+import type { CapturedOutput } from "./capture.js";
 import { RunStoreError, SpawnError, UsageError, errorCode, errorMessage } from "./errors.js";
 import type { RunStore, RunWriter } from "./store.js";
 
 type CapturedChild = ChildProcessByStdio<null, Readable, Readable>;
 
 export const FORWARDED_SIGNALS: readonly NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
-export const TAIL_RING_BYTES = 256 * 1024;
 
-const LF = 0x0a;
-const CR = 0x0d;
-
-export interface RunCapture {
-  readonly captured: Buffer;
+export interface RunCapture extends CapturedOutput {
   readonly validUtf8: boolean;
-  readonly bytes: number;
-  readonly lines: number;
-  readonly headSegmentLines: number;
   readonly exitCode: number;
   readonly signal: NodeJS.Signals | null;
   readonly interrupted: boolean;
-  readonly oversize: boolean;
   readonly startedAt: string;
   readonly endedAt: string;
   readonly storeFailure?: RunStoreError;
@@ -40,119 +33,13 @@ export interface RunCommandInput {
   readonly onSignalForward?: (signal: NodeJS.Signals) => void;
 }
 
-class LineCounter {
-  #terminators = 0;
-  #pendingCr = false;
-  #lastByte: number | undefined;
-
-  push(chunk: Buffer): void {
-    for (const byte of chunk) {
-      if (this.#pendingCr) {
-        this.#pendingCr = false;
-        this.#terminators += 1;
-        if (byte === LF) {
-          this.#lastByte = byte;
-          continue;
-        }
-      }
-      if (byte === CR) {
-        this.#pendingCr = true;
-        this.#lastByte = byte;
-        continue;
-      }
-      if (byte === LF) this.#terminators += 1;
-      this.#lastByte = byte;
-    }
-  }
-
-  get terminators(): number {
-    return this.#terminators + (this.#pendingCr ? 1 : 0);
-  }
-
-  get lines(): number {
-    if (this.#lastByte === undefined) return 0;
-    const endsWithTerminator = this.#lastByte === LF || this.#lastByte === CR;
-    return this.terminators + (endsWithTerminator ? 0 : 1);
-  }
-}
-
-class CaptureBuffer {
-  readonly #maxBytes: number;
-  readonly #head: Buffer[] = [];
-  readonly #ring: Buffer[] = [];
-  readonly #headCounter = new LineCounter();
-  #headBytes = 0;
-  #ringBytes = 0;
-  #oversize = false;
-
-  constructor(maxBytes: number) {
-    this.#maxBytes = maxBytes;
-  }
-
-  get oversize(): boolean {
-    return this.#oversize;
-  }
-
-  get headSegmentLines(): number {
-    return this.#oversize ? this.#headCounter.terminators : this.#headCounter.lines;
-  }
-
-  push(chunk: Buffer): void {
-    let rest = chunk;
-    if (!this.#oversize) {
-      const room = this.#maxBytes - this.#headBytes;
-      if (rest.length <= room) {
-        this.#head.push(rest);
-        this.#headCounter.push(rest);
-        this.#headBytes += rest.length;
-        return;
-      }
-      if (room > 0) {
-        const head = rest.subarray(0, room);
-        this.#head.push(head);
-        this.#headCounter.push(head);
-        this.#headBytes += room;
-        rest = rest.subarray(room);
-      }
-      this.#oversize = true;
-    }
-    this.#ring.push(rest);
-    this.#ringBytes += rest.length;
-    this.#trimRing();
-  }
-
-  bytes(): Buffer {
-    if (!this.#oversize) return Buffer.concat(this.#head);
-    const head = trimToLastTerminator(Buffer.concat(this.#head));
-    const tail = trimToFirstLine(Buffer.concat(this.#ring));
-    return Buffer.concat([head, tail]);
-  }
-
-  #trimRing(): void {
-    while (this.#ringBytes > TAIL_RING_BYTES) {
-      const first = this.#ring[0];
-      if (first === undefined) return;
-      const excess = this.#ringBytes - TAIL_RING_BYTES;
-      if (first.length <= excess) {
-        this.#ring.shift();
-        this.#ringBytes -= first.length;
-      } else {
-        this.#ring[0] = first.subarray(excess);
-        this.#ringBytes -= excess;
-      }
-    }
-  }
-}
-
 export async function runCommand(input: RunCommandInput): Promise<RunCapture> {
   const executable = input.argv[0];
   if (executable === undefined || executable.length === 0) {
     throw new UsageError("run needs a command to execute");
   }
   const writer = await openWriter(input);
-  const buffer = new CaptureBuffer(input.maxPruneBytes);
-  const counter = new LineCounter();
-  let bytes = 0;
+  const capture = new OutputCapture(input.maxPruneBytes);
   let storeFailure = writer.failure;
   const startedAt = new Date().toISOString();
 
@@ -165,9 +52,7 @@ export async function runCommand(input: RunCommandInput): Promise<RunCapture> {
 
   let paused = false;
   const onChunk = (chunk: Buffer): void => {
-    bytes += chunk.length;
-    counter.push(chunk);
-    buffer.push(chunk);
+    capture.push(chunk);
     const ready = writer.write(chunk);
     if (ready || paused) return;
     paused = true;
@@ -197,17 +82,13 @@ export async function runCommand(input: RunCommandInput): Promise<RunCapture> {
   }
   storeFailure = writer.failure ?? storeFailure;
 
-  const captured = buffer.bytes();
+  const output = capture.result();
   return {
-    captured,
-    validUtf8: isValidUtf8(captured),
-    bytes,
-    lines: counter.lines,
-    headSegmentLines: buffer.headSegmentLines,
+    ...output,
+    validUtf8: isValidUtf8(output.captured),
     exitCode: exitCodeOf(exit),
     signal: exit.signal,
     interrupted: receivedSignal || exit.signal !== null,
-    oversize: buffer.oversize,
     startedAt,
     endedAt: new Date().toISOString(),
     ...(storeFailure !== undefined ? { storeFailure } : {}),
@@ -292,22 +173,3 @@ function exitCodeOf(exit: { code: number | null; signal: NodeJS.Signals | null }
   return 0;
 }
 
-function trimToLastTerminator(buffer: Buffer): Buffer {
-  for (let index = buffer.length - 1; index >= 0; index -= 1) {
-    const byte = buffer[index];
-    if (byte === LF || byte === CR) return buffer.subarray(0, index + 1);
-  }
-  return buffer.subarray(0, 0);
-}
-
-function trimToFirstLine(buffer: Buffer): Buffer {
-  for (let index = 0; index < buffer.length; index += 1) {
-    const byte = buffer[index];
-    if (byte === LF) return buffer.subarray(index + 1);
-    if (byte === CR) {
-      const next = buffer[index + 1];
-      return buffer.subarray(next === LF ? index + 2 : index + 1);
-    }
-  }
-  return Buffer.alloc(0);
-}

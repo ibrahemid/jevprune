@@ -33,6 +33,26 @@ function buildLog(): string {
   return `${lines.join("\n")}\n`;
 }
 
+function buildLongLog(count: number): string {
+  const pad = "y".repeat(80);
+  const lines: string[] = [];
+  for (let index = 1; index <= count; index += 1) lines.push(`line ${String(index)} ${pad}`);
+  return `${lines.join("\n")}\n`;
+}
+
+function chunked(text: string, size: number): Buffer[] {
+  const bytes = Buffer.from(text, "utf8");
+  const chunks: Buffer[] = [];
+  for (let start = 0; start < bytes.length; start += size) chunks.push(bytes.subarray(start, start + size));
+  return chunks;
+}
+
+function firstMarker(kept: string): { from: number; to: number } {
+  const match = /\[jevprune: \d+ lines dropped, run [a-z0-9]+-[a-f0-9]{4}, lines (\d+)-(\d+)\]/.exec(kept);
+  expect(match).not.toBeNull();
+  return { from: Number(match?.[1]), to: Number(match?.[2]) };
+}
+
 function keepMarked(): NoulScorer {
   return (id, _instructions, state) => {
     const window = state as unknown as WindowState;
@@ -149,6 +169,44 @@ describe("pruneOutput", () => {
     await expect(readdir(join(home, "runs"))).rejects.toThrow();
   });
 
+  it("falls back on the head and the tail without a request over maxPruneBytes", async () => {
+    const text = buildLog();
+    const client = new FakeJevClient({ noul: keepMarked() });
+    const result = await pruneOutput({
+      text,
+      task: "find the session problem",
+      command: "pnpm build",
+      exitCode: 0,
+      client,
+      env: homeEnv(home),
+      config: { maxPruneBytes: 1024, headLines: 5, tailLines: 4, contextLines: 0 },
+    });
+
+    expect(client.calls).toEqual([]);
+    expect(result.mode).toBe("fallback");
+    expect(result.fallbackReason).toBe("output over 1024 bytes");
+    expect(result.linesIn).toBe(splitLines(text).length);
+    expect(result.linesOut).toBeLessThan(result.linesIn);
+    expect(result.footer).toContain("fallback (Jev unavailable: output over 1024 bytes)");
+    expect((await new RunStore({ home }).readRun(result.runId)).text).toBe(text);
+  });
+
+  it("applies the size limit before the failed command passthrough", async () => {
+    const client = new FakeJevClient({ noul: keepMarked() });
+    const result = await pruneOutput({
+      text: buildLog(),
+      task: "find the session problem",
+      exitCode: 1,
+      client,
+      env: homeEnv(home),
+      config: { maxPruneBytes: 1024, headLines: 5, tailLines: 4, contextLines: 0 },
+    });
+
+    expect(client.calls).toEqual([]);
+    expect(result.mode).toBe("fallback");
+    expect(result.fallbackReason).toBe("output over 1024 bytes");
+  });
+
   it("applies the config overrides over the loaded config", async () => {
     const client = new FakeJevClient({ noul: () => 0.3 });
     const kept = await pruneOutput({
@@ -182,5 +240,48 @@ describe("pruneStream", () => {
     expect(result.mode).toBe("jev");
     expect(result.linesIn).toBe(splitLines(text).length);
     expect(result.kept).toContain("keep: the session store is empty");
+  });
+
+  it("bounds the read at maxPruneBytes, makes no request and still saves the whole stream", async () => {
+    const text = buildLongLog(20_000);
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const result = await pruneStream({
+      stream: Readable.from(chunked(text, 64 * 1024)),
+      task: "read the last lines",
+      exitCode: 0,
+      client,
+      env: homeEnv(home),
+      config: { maxPruneBytes: 65_536, headLines: 20, tailLines: 10, contextLines: 0 },
+    });
+
+    expect(client.calls).toEqual([]);
+    expect(result.mode).toBe("fallback");
+    expect(result.fallbackReason).toBe("output over 65536 bytes");
+    expect(result.linesIn).toBe(20_000);
+    expect(result.linesOut).toBeLessThan(result.linesIn);
+
+    const store = new RunStore({ home });
+    expect((await store.readRun(result.runId)).text).toBe(text);
+
+    const marker = firstMarker(result.kept);
+    expect(await store.readRunLines(result.runId, marker.from, marker.to)).toBe(
+      splitLines(text)
+        .slice(marker.from - 1, marker.to)
+        .map((line) => line.text + line.terminator)
+        .join(""),
+    );
+  });
+
+  it("saves nothing but a ledger entry on the fast path", async () => {
+    const result = await pruneStream({
+      stream: Readable.from([Buffer.from("one\ntwo\n", "utf8")]),
+      task: "anything",
+      exitCode: 0,
+      client: new FakeJevClient(),
+      env: homeEnv(home),
+    });
+    expect(result.mode).toBe("fast-path");
+    expect(result.logPath).toBeUndefined();
+    expect(await exists(join(home, "runs", `${result.runId}.log`))).toBe(false);
   });
 });
