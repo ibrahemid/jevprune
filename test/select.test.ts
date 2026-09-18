@@ -214,7 +214,7 @@ describe("selectLines", () => {
     };
     const noKey = await selectLines({ ...base, client: null });
     expect(noKey.mode).toBe("fallback");
-    expect(noKey.fallbackReason).toBe("no api key");
+    expect(noKey.fallbackReason).toBe("API key not set");
     expect(noKey.linesIn).toBe(lines.length);
     expect(noKey.linesOut).toBe(12);
     expect(noKey.decisions.get(1)).toEqual({ keep: true, reason: "head" });

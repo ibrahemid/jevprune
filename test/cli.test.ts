@@ -109,6 +109,10 @@ describe("cli", () => {
     const asked = testIo(homeEnv(home));
     expect(await runCli(["--help"], asked)).toBe(0);
     expect(asked.out()).toContain("usage: jevprune");
+    expect(asked.out()).toContain("exits with the command's exit code");
+    expect(asked.out()).toContain("reports only its own exit status");
+    expect(asked.out()).toContain("estimates the output tokens removed");
+    expect(asked.out()).toContain("--threshold <n>   minimum Jev score to keep a line, 0 to 1");
 
     const bare = testIo(homeEnv(home));
     expect(await runCli([], bare)).toBe(2);
@@ -152,7 +156,7 @@ describe("cli run", () => {
     const [id] = await runIds();
     expect(id).toBeDefined();
     expect(io.out()).toBe(
-      `line 1\nline 2\nline 3\njevprune: fallback (no Jev: no api key), 3 → 3 lines, exit 0, full output ${join(home, "runs", `${String(id)}.log`)}\n`,
+      `line 1\nline 2\nline 3\njevprune: fallback (Jev unavailable: API key not set), 3 → 3 lines, exit 0, full output ${join(home, "runs", `${String(id)}.log`)}\n`,
     );
     expect(io.err()).toBe("");
 
@@ -160,7 +164,7 @@ describe("cli run", () => {
     const record = await store.readRun(String(id));
     expect(record.text).toBe("line 1\nline 2\nline 3\n");
     expect(record.meta?.mode).toBe("fallback");
-    expect(record.meta?.fallbackReason).toBe("no api key");
+    expect(record.meta?.fallbackReason).toBe("API key not set");
     expect(record.meta?.task).toBe("check the output");
     expect(record.meta?.exitCode).toBe(0);
     expect(await store.readGain()).toMatchObject({ runs: 1, linesIn: 3, linesOut: 3 });
@@ -192,7 +196,7 @@ describe("cli run", () => {
     expect(await runCli(["run", "--task", "check the output", "--", ...node(script)], io)).toBe(0);
 
     const [id] = await runIds();
-    expect(io.out()).toContain("jevprune: fallback (no Jev: output over 1024 bytes), 200 → ");
+    expect(io.out()).toContain("jevprune: fallback (Jev unavailable: output over 1024 bytes), 200 → ");
     expect(io.out()).toContain(`full output ${join(home, "runs", `${String(id)}.log`)}`);
 
     const record = await new RunStore({ home }).readRun(String(id));
@@ -204,7 +208,7 @@ describe("cli run", () => {
 
   it("numbers every printed line and every marker of a truncated capture by the run log", async () => {
     const run = await truncatedRun(65_536, 6_000);
-    expect(run.footer).toContain("jevprune: fallback (no Jev: output over 65536 bytes), 6,000 → ");
+    expect(run.footer).toContain("jevprune: fallback (Jev unavailable: output over 65536 bytes), 6,000 → ");
     expect(run.log).toHaveLength(6_000);
     const [marker] = markersOf(run.printed);
     expect(markersOf(run.printed)).toHaveLength(1);
@@ -227,7 +231,7 @@ describe("cli run", () => {
     const script = "process.stdout.write('one\\ntwo\\n');";
     expect(await runCli(["run", "--task", "check the output", "--", ...node(script)], io)).toBe(0);
     expect(io.out()).toBe(
-      "one\ntwo\njevprune: fallback (no Jev: no api key), 2 → 2 lines, exit 0, run store unavailable (EEXIST)\n",
+      "one\ntwo\njevprune: fallback (Jev unavailable: API key not set), 2 → 2 lines, exit 0, full output was not saved (EEXIST)\n",
     );
   });
 
@@ -271,7 +275,7 @@ describe("cli run", () => {
         expect(io.err(), `attempt ${String(attempt)}`).toBe(
           "jevprune: TYPESAFE_API_KEY rejected (401), using fallback\n",
         );
-        expect(io.out()).toContain("jevprune: fallback (no Jev: unauthorized (401)), 5 → ");
+        expect(io.out()).toContain("jevprune: fallback (Jev unavailable: unauthorized (401)), 5 → ");
       }
     } finally {
       await new Promise<void>((resolve) => {
@@ -328,7 +332,7 @@ describe("cli run", () => {
     const printed = io.outBytes();
     expect(printed.subarray(0, head.length)).toEqual(head);
     expect(printed.includes(Buffer.from("\u2713 \u276f \ud83d\ude80 line 40\n", "utf8"))).toBe(true);
-    expect(io.out()).toContain("jevprune: fallback (no Jev: no api key), 40 \u2192 ");
+    expect(io.out()).toContain("jevprune: fallback (Jev unavailable: API key not set), 40 \u2192 ");
 
     let expected = "";
     for (let i = 1; i <= 40; i += 1) expected += `\u2713 \u276f \ud83d\ude80 line ${String(i)}\n`;
@@ -369,7 +373,7 @@ describe("cli run", () => {
 
     expect(io.out()).toMatch(/^line 1 y+\n/);
     expect(io.out()).toContain(
-      "jevprune: exit 5, 200 lines passed through (output over 1024 bytes), run store unavailable (EEXIST)\n",
+      "jevprune: exit 5, 200 lines passed through (output over 1024 bytes), full output was not saved (EEXIST)\n",
     );
   });
 
@@ -503,14 +507,14 @@ describe("cli gain", () => {
     const io = testIo(homeEnv(home));
     expect(await runCli(["gain"], io)).toBe(0);
     expect(io.out()).toBe(
-      "jevprune: 2 runs, 2,000 → 100 lines, ~32,000 tokens saved (estimated at 3 chars per token)\n",
+      "jevprune: 2 runs, 2,000 → 100 lines, ~32,000 output tokens removed (estimate: 3 bytes per token)\n",
     );
   });
 
   it("reports zeros when nothing has run", async () => {
     const io = testIo(homeEnv(home));
     expect(await runCli(["gain"], io)).toBe(0);
-    expect(io.out()).toBe("jevprune: 0 runs, 0 → 0 lines, ~0 tokens saved (estimated at 3 chars per token)\n");
+    expect(io.out()).toBe("jevprune: 0 runs, 0 → 0 lines, ~0 output tokens removed (estimate: 3 bytes per token)\n");
   });
 
   it("rejects a flag with exit 2", async () => {
@@ -530,7 +534,7 @@ describe("cli select", () => {
 
     const [id] = await runIds();
     expect(io.out()).toBe(
-      `alpha\nbeta\njevprune: fallback (no Jev: no api key), 2 → 2 lines, full output ${join(home, "runs", `${String(id)}.log`)}\n`,
+      `alpha\nbeta\njevprune: fallback (Jev unavailable: API key not set), 2 → 2 lines, full output ${join(home, "runs", `${String(id)}.log`)}\n`,
     );
     expect(await readFile(join(home, "runs", `${String(id)}.log`), "utf8")).toBe("alpha\nbeta\n");
   });

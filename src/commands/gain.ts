@@ -10,7 +10,7 @@ export async function runGain(io: CliIo): Promise<number> {
   const totals = await store.readGain();
   const tokens = Math.max(0, Math.floor((totals.bytesIn - totals.bytesOut) / CHARS_PER_TOKEN));
   await io.write(
-    `jevprune: ${formatCount(totals.runs)} runs, ${formatCount(totals.linesIn)} → ${formatCount(totals.linesOut)} lines, ~${formatCount(tokens)} tokens saved (estimated at ${String(CHARS_PER_TOKEN)} chars per token)\n`,
+    `jevprune: ${formatCount(totals.runs)} runs, ${formatCount(totals.linesIn)} → ${formatCount(totals.linesOut)} lines, ~${formatCount(tokens)} output tokens removed (estimate: ${String(CHARS_PER_TOKEN)} bytes per token)\n`,
   );
   return 0;
 }

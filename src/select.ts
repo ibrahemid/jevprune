@@ -149,7 +149,14 @@ export async function selectLines(input: SelectInput): Promise<SelectionResult> 
   }
 
   if (input.client === null) {
-    return fallbackSelection({ lines, keeps, input, reason: "no api key", bytesIn, linesIn: lines.length });
+    return fallbackSelection({
+      lines,
+      keeps,
+      input,
+      reason: "API key not set",
+      bytesIn,
+      linesIn: lines.length,
+    });
   }
 
   let verdicts: JevVerdicts;

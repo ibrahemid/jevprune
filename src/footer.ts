@@ -25,12 +25,12 @@ export function formatFooter(input: FooterInput): string {
     const note = input.passthroughNote === undefined ? "" : ` (${input.passthroughNote})`;
     parts.push(`${formatCount(input.linesIn)} lines passed through${note}`);
   } else {
-    if (input.mode === "fallback") parts.push(`fallback (no Jev: ${input.fallbackReason ?? "unknown"})`);
+    if (input.mode === "fallback") parts.push(`fallback (Jev unavailable: ${input.fallbackReason ?? "unknown"})`);
     parts.push(`${formatCount(input.linesIn)} → ${formatCount(input.linesOut)} lines`);
     if (input.exitCode !== undefined && input.exitCode !== null) parts.push(`exit ${String(input.exitCode)}`);
   }
   if (input.storeFailureCode !== undefined) {
-    parts.push(`run store unavailable (${input.storeFailureCode})`);
+    parts.push(`full output was not saved (${input.storeFailureCode})`);
   } else if (input.logPath !== undefined) {
     parts.push(`full output ${displayPath(input.logPath, input.home)}`);
   }

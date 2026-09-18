@@ -27,7 +27,7 @@ describe("formatFooter", () => {
         logPath: "/tmp/runs/abc-1234.log",
         home: "/home/dev",
       }),
-    ).toBe("jevprune: fallback (no Jev: timeout), 3,104 → 83 lines, exit 0, full output /tmp/runs/abc-1234.log");
+    ).toBe("jevprune: fallback (Jev unavailable: timeout), 3,104 → 83 lines, exit 0, full output /tmp/runs/abc-1234.log");
   });
 
   it("reports a passthrough run with the exit code first", () => {
@@ -56,7 +56,7 @@ describe("formatFooter", () => {
         logPath: "/tmp/a.log",
         storeFailureCode: "EACCES",
       }),
-    ).toBe("jevprune: exit 0, 12 lines passed through, run store unavailable (EACCES)");
+    ).toBe("jevprune: exit 0, 12 lines passed through, full output was not saved (EACCES)");
   });
 });
 

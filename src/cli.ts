@@ -19,12 +19,19 @@ const HELP = `usage: jevprune <command> [options]
 
 commands:
   run [--task <text>] [--threshold <n>] [--hook] [--transcript <path>] -- <command> [args...]
+      runs the command, prints the kept lines and exits with the command's exit code
   select [--task <text>] [--threshold <n>] [--file <path>] [--command <text>]
+      prunes a local file or stdin and reports only its own exit status
   show <id> [--lines A-B]
+      prints a saved run, or one line range of it, exactly as it was captured
   gain
+      totals the locally recorded runs and estimates the output tokens removed
   hook
+      reads a plugin PreToolUse event on stdin and answers it
 
 options:
+  --task <text>     the task the kept lines have to serve
+  --threshold <n>   minimum Jev score to keep a line, 0 to 1
   --help
   --version
 `;

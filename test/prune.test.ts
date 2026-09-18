@@ -111,13 +111,13 @@ describe("pruneOutput", () => {
       config: { headLines: 5, tailLines: 4, contextLines: 0 },
     });
     expect(result.mode).toBe("fallback");
-    expect(result.fallbackReason).toBe("no api key");
+    expect(result.fallbackReason).toBe("API key not set");
     expect(result.linesIn).toBe(splitLines(text).length);
     expect(result.linesOut).toBe(10);
     expect(result.kept).toContain("[1/100] copying asset-1");
     expect(result.kept).toContain("[cleanup] removing temp-20");
     expect(result.kept).toContain(`lines dropped, run ${result.runId}, lines 6-117`);
-    expect(result.footer).toContain("fallback (no Jev: no api key)");
+    expect(result.footer).toContain("fallback (Jev unavailable: API key not set)");
     expect((await new RunStore({ home }).readRun(result.runId)).text).toBe(text);
   });
 
