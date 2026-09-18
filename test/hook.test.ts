@@ -4,7 +4,8 @@ import { runCli } from "../src/cli.js";
 import { DEFAULT_ALLOWLIST, DEFAULT_CONFIG } from "../src/config.js";
 import type { ResolvedConfig } from "../src/config.js";
 import {
-  INTERACTIVE_COMMANDS,
+  ALWAYS_INTERACTIVE_COMMANDS,
+  INTERACTIVE_WHEN_BARE_COMMANDS,
   STATE_CHANGING_TOKENS,
   hasStateChange,
   parsePreToolUse,
@@ -98,12 +99,42 @@ describe("planRewrite", () => {
     }
   });
 
-  it("skips every interactive first word, after sudo and after env assignments", () => {
-    for (const word of INTERACTIVE_COMMANDS) {
+  it("skips every always-interactive first word, after sudo and after env assignments", () => {
+    for (const word of ALWAYS_INTERACTIVE_COMMANDS) {
       expect(rewriteOf(`${word} --version`), word).toBeNull();
       expect(rewriteOf(`sudo ${word} --version`), word).toBeNull();
       expect(rewriteOf(`FOO=bar ${word} --version`), word).toBeNull();
     }
+  });
+
+  it("skips bare REPLs and shells but wraps them when they take arguments", () => {
+    for (const word of INTERACTIVE_WHEN_BARE_COMMANDS) {
+      expect(rewriteOf(word), word).toBeNull();
+      expect(rewriteOf(`FOO=bar ${word}`), word).toBeNull();
+      if (word !== "gh") expect(rewriteOf(`${word} --version`), word).not.toBeNull();
+    }
+    expect(rewriteOf("python -m pytest -q")).not.toBeNull();
+    expect(rewriteOf("python3 scripts/build.py")).not.toBeNull();
+    expect(rewriteOf("node scripts/check.js")).not.toBeNull();
+    expect(rewriteOf("bash scripts/gate.sh")).not.toBeNull();
+    expect(rewriteOf("sh -c 'npm test 2>&1'")).not.toBeNull();
+    expect(rewriteOf("psql -c 'select 1'")).not.toBeNull();
+    expect(rewriteOf("gh pr list")).not.toBeNull();
+    expect(rewriteOf("bash -i")).toBeNull();
+    expect(rewriteOf("zsh -i -c ls")).toBeNull();
+    expect(rewriteOf("gh auth login")).toBeNull();
+  });
+
+  it("skips docker exec and run with a terminal flag", () => {
+    for (const command of ["docker exec -it web sh", "docker exec -i web sh", "docker run --rm -it node:22 bash", "docker run --interactive --tty img"]) {
+      expect(rewriteOf(command), command).toBeNull();
+    }
+    for (const command of ["docker exec web ls -la", "docker run --rm node:22 node -v", "docker compose up -d"]) {
+      expect(rewriteOf(command), command).not.toBeNull();
+    }
+  });
+
+  it("skips tail -f and wraps other tails", () => {
     expect(rewriteOf("tail -f server.log")).toBeNull();
     expect(rewriteOf("FOO=bar tail -f server.log")).toBeNull();
     expect(rewriteOf("tail -n 40 server.log")).not.toBeNull();

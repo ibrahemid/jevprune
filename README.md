@@ -188,7 +188,7 @@ jevprune: fallback (no Jev: timeout), 3,104 → 83 lines, exit 0, full output ~/
 
 A `PreToolUse` hook on `Bash` rewrites the command to `jevprune run --hook --transcript <path> -- bash -c '<command>'`. `bash -c` keeps pipelines, redirects and quoting as the agent wrote them; jevprune only owns capture and selection.
 
-The hook leaves a command alone when it is already wrapped, runs in the background, ends with `&`, changes shell state (`cd`, `export`, `source`, `.`, `unset`, `alias`, `set`, `eval`, `exec`, `pushd`, `popd`), starts a program that owns its own output (`vim`, `less`, `ssh`, `sudo`, `python`, `node`, `bash`, `gh`, and similar), or starts with an allowlisted prefix (`cd`, `ls`, `pwd`, `echo`, `git status`, `git add`, `git commit`, `git log`, `git diff --stat`, `which`, `mkdir`, `touch`, `true`, `test`, `[`).
+The hook leaves a command alone when it is already wrapped, runs in the background, ends with `&`, changes shell state (`cd`, `export`, `source`, `.`, `unset`, `alias`, `set`, `eval`, `exec`, `pushd`, `popd`), starts an interactive program (`vim`, `less`, `ssh`, `sudo`, `top`, `tmux`, `claude`, and similar), starts a REPL or shell with no arguments (`python`, `node`, `bash`, `psql`, `gh`), runs `docker exec` or `docker run` with a terminal flag, follows a file with `tail -f`, or starts with an allowlisted prefix (`cd`, `ls`, `pwd`, `echo`, `git status`, `git add`, `git commit`, `git log`, `git diff --stat`, `which`, `mkdir`, `touch`, `true`, `test`, `[`).
 
 Set `"autoWrap": false` in `~/.jevprune/config.json` to turn the rewrite off. The bundled skill then tells the agent to call `jevprune run` itself for long commands.
 

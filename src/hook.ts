@@ -29,7 +29,7 @@ export const STATE_CHANGING_TOKENS: readonly string[] = [
   "popd",
 ];
 
-export const INTERACTIVE_COMMANDS: readonly string[] = [
+export const ALWAYS_INTERACTIVE_COMMANDS: readonly string[] = [
   "vim",
   "vi",
   "nvim",
@@ -47,6 +47,11 @@ export const INTERACTIVE_COMMANDS: readonly string[] = [
   "sudo",
   "su",
   "passwd",
+  "claude",
+  "watch",
+];
+
+export const INTERACTIVE_WHEN_BARE_COMMANDS: readonly string[] = [
   "python",
   "python3",
   "node",
@@ -58,10 +63,11 @@ export const INTERACTIVE_COMMANDS: readonly string[] = [
   "sh",
   "zsh",
   "fish",
-  "claude",
   "gh",
-  "watch",
 ];
+
+const SHELL_COMMANDS: readonly string[] = ["bash", "sh", "zsh", "fish"];
+const DOCKER_TTY_FLAG = /^-(?:i|t|it|ti)$|^--interactive$|^--tty$/;
 
 const STATE_CHANGE_PATTERN = new RegExp(
   `(?:^|;|\\||\\(|&&)\\s*(?:${STATE_CHANGING_TOKENS.map(escapeRegExp).join("|")})(?=\\s|$|[;|)&])`,
@@ -79,11 +85,22 @@ export function hasStateChange(command: string): boolean {
 
 export function isInteractiveCommand(command: string): boolean {
   const words = command.split(/\s+/).filter((word) => word.length > 0);
-  for (const [index, word] of words.entries()) {
-    if (ENV_ASSIGNMENT_PATTERN.test(word)) continue;
-    return INTERACTIVE_COMMANDS.includes(word) || (word === "tail" && words[index + 1] === "-f");
+  let index = 0;
+  while (index < words.length && ENV_ASSIGNMENT_PATTERN.test(words[index] ?? "")) index += 1;
+  const word = words[index];
+  if (word === undefined) return true;
+  const rest = words.slice(index + 1);
+  if (ALWAYS_INTERACTIVE_COMMANDS.includes(word)) return true;
+  if (INTERACTIVE_WHEN_BARE_COMMANDS.includes(word)) {
+    if (rest.length === 0) return true;
+    if (SHELL_COMMANDS.includes(word) && rest.includes("-i")) return true;
+    return word === "gh" && rest[0] === "auth";
   }
-  return true;
+  if (word === "tail") return rest[0] === "-f";
+  if (word === "docker" && (rest[0] === "exec" || rest[0] === "run")) {
+    return rest.some((flag) => DOCKER_TTY_FLAG.test(flag));
+  }
+  return false;
 }
 
 export function isAllowlisted(command: string, allowlist: readonly string[]): boolean {
