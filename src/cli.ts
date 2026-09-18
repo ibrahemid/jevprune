@@ -1,10 +1,13 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import type { ParseArgsOptionsConfig } from "node:util";
 
+import { runGain } from "./commands/gain.js";
 import { runRun } from "./commands/run.js";
 import { runSelect } from "./commands/select.js";
+import { runShow } from "./commands/show.js";
 import { parseThreshold } from "./config.js";
 import { ConfigError, JevpruneError, SpawnError, UsageError, errorMessage } from "./errors.js";
 import { processIo } from "./io.js";
@@ -16,6 +19,8 @@ const HELP = `usage: jevprune <command> [options]
 commands:
   run [--task <text>] [--threshold <n>] [--hook] [--transcript <path>] -- <command> [args...]
   select [--task <text>] [--threshold <n>] [--file <path>] [--command <text>]
+  show <id> [--lines A-B]
+  gain
 
 options:
   --help
@@ -86,6 +91,22 @@ async function dispatch(argv: readonly string[], io: CliIo): Promise<number> {
         io,
       );
     }
+    case "show": {
+      const parsed = parseWithPositionals(args, { lines: { type: "string" } });
+      const id = parsed.positionals[0];
+      if (id === undefined) throw new UsageError("show needs a run id");
+      if (parsed.positionals.length > 1) {
+        throw new UsageError(`show takes one run id, got ${String(parsed.positionals.length)}`);
+      }
+      return await runShow(
+        { id, ...(parsed.values.lines !== undefined ? { lines: parsed.values.lines } : {}) },
+        io,
+      );
+    }
+    case "gain": {
+      parse(args, {});
+      return await runGain(io);
+    }
     default:
       throw new UsageError(`unknown command "${command}"`);
   }
@@ -94,6 +115,14 @@ async function dispatch(argv: readonly string[], io: CliIo): Promise<number> {
 function parse<T extends ParseArgsOptionsConfig>(args: readonly string[], options: T) {
   try {
     return parseArgs({ args: [...args], options, strict: true, allowPositionals: false }).values;
+  } catch (error) {
+    throw new UsageError(errorMessage(error), { cause: error });
+  }
+}
+
+function parseWithPositionals<T extends ParseArgsOptionsConfig>(args: readonly string[], options: T) {
+  try {
+    return parseArgs({ args: [...args], options, strict: true, allowPositionals: true });
   } catch (error) {
     throw new UsageError(errorMessage(error), { cause: error });
   }
@@ -118,7 +147,15 @@ async function report(error: unknown, io: CliIo): Promise<number> {
   return 1;
 }
 
+function entryUrl(path: string): string {
+  try {
+    return pathToFileURL(realpathSync(path)).href;
+  } catch {
+    return "";
+  }
+}
+
 const entry = process.argv[1];
-if (entry !== undefined && import.meta.url === pathToFileURL(entry).href) {
+if (entry !== undefined && import.meta.url === entryUrl(entry)) {
   process.exitCode = await runCli(process.argv.slice(2), processIo());
 }

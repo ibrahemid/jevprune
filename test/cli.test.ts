@@ -152,6 +152,107 @@ describe("cli run", () => {
   });
 });
 
+describe("cli show", () => {
+  async function savedRun(): Promise<string> {
+    await writeConfig(home, { fastPathLines: 0 });
+    const io = testIo(homeEnv(home));
+    const script = "for (let i = 1; i <= 4; i += 1) process.stdout.write('line ' + i + '\\n');";
+    expect(await runCli(["run", "--task", "check the output", "--", ...node(script)], io)).toBe(0);
+    const [id] = await runIds();
+    expect(id).toBeDefined();
+    return String(id);
+  }
+
+  it("prints the whole run log", async () => {
+    const id = await savedRun();
+    const io = testIo(homeEnv(home));
+    expect(await runCli(["show", id], io)).toBe(0);
+    expect(io.out()).toBe("line 1\nline 2\nline 3\nline 4\n");
+  });
+
+  it("prints a line range written with a dash or a colon", async () => {
+    const id = await savedRun();
+    for (const range of ["2-3", "2:3"]) {
+      const io = testIo(homeEnv(home));
+      expect(await runCli(["show", id, "--lines", range], io)).toBe(0);
+      expect(io.out()).toBe("line 2\nline 3\n");
+    }
+  });
+
+  it("exits 1 for an unknown id, a range outside the run and a malformed range", async () => {
+    const id = await savedRun();
+
+    const unknown = testIo(homeEnv(home));
+    expect(await runCli(["show", "zzzz-0000"], unknown)).toBe(1);
+    expect(unknown.err()).toBe("jevprune: run zzzz-0000 was not found\n");
+
+    const outside = testIo(homeEnv(home));
+    expect(await runCli(["show", id, "--lines", "3-9"], outside)).toBe(1);
+    expect(outside.err()).toBe(`jevprune: line range 3-9 is outside run ${id} (4 lines)\n`);
+
+    const malformed = testIo(homeEnv(home));
+    expect(await runCli(["show", id, "--lines", "two"], malformed)).toBe(1);
+    expect(malformed.err()).toBe('jevprune: --lines must be A-B or A:B, got "two"\n');
+
+    const inverted = testIo(homeEnv(home));
+    expect(await runCli(["show", id, "--lines", "3-2"], inverted)).toBe(1);
+    expect(inverted.err()).toBe('jevprune: --lines must be a range with 1 <= A <= B, got "3-2"\n');
+  });
+
+  it("rejects a missing id and a second id with exit 2", async () => {
+    const missing = testIo(homeEnv(home));
+    expect(await runCli(["show"], missing)).toBe(2);
+    expect(missing.err()).toBe("jevprune: show needs a run id\n");
+
+    const extra = testIo(homeEnv(home));
+    expect(await runCli(["show", "a-0001", "b-0002"], extra)).toBe(2);
+    expect(extra.err()).toBe("jevprune: show takes one run id, got 2\n");
+  });
+});
+
+describe("cli gain", () => {
+  it("sums the ledger", async () => {
+    await writeConfig(home, { fastPathLines: 0 });
+    const store = new RunStore({ home });
+    await store.appendGain({
+      ts: new Date().toISOString(),
+      id: "aaaa-0001",
+      mode: "jev",
+      linesIn: 1200,
+      linesOut: 90,
+      bytesIn: 60_000,
+      bytesOut: 3_000,
+    });
+    await store.appendGain({
+      ts: new Date().toISOString(),
+      id: "aaaa-0002",
+      mode: "jev",
+      linesIn: 800,
+      linesOut: 10,
+      bytesIn: 40_000,
+      bytesOut: 1_000,
+    });
+
+    const io = testIo(homeEnv(home));
+    expect(await runCli(["gain"], io)).toBe(0);
+    expect(io.out()).toBe(
+      "jevprune: 2 runs, 2,000 → 100 lines, ~32,000 tokens saved (estimated at 3 chars per token)\n",
+    );
+  });
+
+  it("reports zeros when nothing has run", async () => {
+    const io = testIo(homeEnv(home));
+    expect(await runCli(["gain"], io)).toBe(0);
+    expect(io.out()).toBe("jevprune: 0 runs, 0 → 0 lines, ~0 tokens saved (estimated at 3 chars per token)\n");
+  });
+
+  it("rejects a flag with exit 2", async () => {
+    const io = testIo(homeEnv(home));
+    expect(await runCli(["gain", "--nope"], io)).toBe(2);
+    expect(io.err()).toMatch(/^jevprune: /);
+  });
+});
+
 describe("cli select", () => {
   it("reads a file, prints it and saves the run", async () => {
     await writeConfig(home, { fastPathLines: 0 });
