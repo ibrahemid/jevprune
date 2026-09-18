@@ -1,3 +1,5 @@
+import { errorCode } from "./errors.js";
+
 export interface CliIo {
   readonly env: NodeJS.ProcessEnv;
   readonly cwd: string;
@@ -6,13 +8,20 @@ export interface CliIo {
   writeError(text: string): Promise<void>;
 }
 
+export const CLOSED_PIPE_CODES: ReadonlySet<string> = new Set([
+  "EPIPE",
+  "EOF",
+  "ERR_STREAM_DESTROYED",
+  "ERR_STREAM_WRITE_AFTER_END",
+]);
+
 export function processIo(): CliIo {
   return {
     env: process.env,
     cwd: process.cwd(),
     stdin: process.stdin,
-    write: (text) => writeTo(process.stdout, text),
-    writeError: (text) => writeTo(process.stderr, text),
+    write: openWriter(process.stdout),
+    writeError: openWriter(process.stderr),
   };
 }
 
@@ -24,12 +33,37 @@ export async function readStream(stream: NodeJS.ReadableStream): Promise<string>
   return Buffer.concat(chunks).toString("utf8");
 }
 
-function writeTo(stream: NodeJS.WriteStream, text: string): Promise<void> {
-  if (text.length === 0) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    stream.write(text, (error) => {
-      if (error) reject(error);
-      else resolve();
-    });
+export function isClosedPipe(error: unknown): boolean {
+  const code = errorCode(error);
+  return code !== undefined && CLOSED_PIPE_CODES.has(code);
+}
+
+function openWriter(stream: NodeJS.WriteStream): (text: string) => Promise<void> {
+  let closed = false;
+  stream.on("error", (error: unknown) => {
+    if (isClosedPipe(error)) closed = true;
   });
+  return (text: string) =>
+    new Promise((resolve, reject) => {
+      if (closed || text.length === 0) {
+        resolve();
+        return;
+      }
+      try {
+        stream.write(text, (error) => {
+          if (error === undefined || error === null) resolve();
+          else if (isClosedPipe(error)) {
+            closed = true;
+            resolve();
+          } else reject(error);
+        });
+      } catch (error) {
+        if (!isClosedPipe(error)) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+          return;
+        }
+        closed = true;
+        resolve();
+      }
+    });
 }
