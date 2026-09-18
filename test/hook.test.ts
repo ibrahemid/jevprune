@@ -92,6 +92,20 @@ describe("planRewrite", () => {
     }
   });
 
+  it("skips a state-changing token at the start of a later line", () => {
+    for (const separator of ["\n", "\r\n"]) {
+      const command = `npm ci${separator}cd packages/app${separator}npm test`;
+      expect(hasStateChange(command), JSON.stringify(command)).toBe(true);
+      expect(rewriteOf(command), JSON.stringify(command)).toBeNull();
+    }
+  });
+
+  it("wraps a multi-line command with no state-changing token", () => {
+    const command = "npm ci\nnpm test";
+    expect(hasStateChange(command)).toBe(false);
+    expect(rewriteOf(command)).not.toBeNull();
+  });
+
   it("wraps commands that only start with a state-changing token", () => {
     for (const command of ["setup.sh --check", "exports/build.sh", "./env.sh", "cdk deploy"]) {
       expect(hasStateChange(command), command).toBe(false);

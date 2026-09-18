@@ -70,7 +70,7 @@ const SHELL_COMMANDS: readonly string[] = ["bash", "sh", "zsh", "fish"];
 const DOCKER_TTY_FLAG = /^-(?:i|t|it|ti)$|^--interactive$|^--tty$/;
 
 const STATE_CHANGE_PATTERN = new RegExp(
-  `(?:^|;|\\||\\(|&&)\\s*(?:${STATE_CHANGING_TOKENS.map(escapeRegExp).join("|")})(?=\\s|$|[;|)&])`,
+  `(?:^|;|\\||\\(|&&|\\n)\\s*(?:${STATE_CHANGING_TOKENS.map(escapeRegExp).join("|")})(?=\\s|$|[;|)&])`,
 );
 
 const ENV_ASSIGNMENT_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*=/;
