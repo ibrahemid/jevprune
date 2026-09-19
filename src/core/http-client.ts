@@ -14,6 +14,8 @@ import type {
   NoulRequest,
   NoulResult,
 } from "./client.js";
+import { resolveTimeoutSignal } from "./timeout.js";
+import type { TimeoutSignalFactory } from "./timeout.js";
 import {
   JevAbortError,
   JevConfigError,
@@ -27,7 +29,6 @@ export interface HookFetchInit {
   readonly method?: string;
   readonly headers?: Readonly<Record<string, string>>;
   readonly body?: string;
-  readonly signal?: AbortSignal;
 }
 
 export interface HookFetchResponse {
@@ -45,10 +46,27 @@ export interface HttpJevClientConfig {
   readonly model?: string;
   readonly timeoutMs?: number;
   readonly maxRetries?: number;
+  readonly timeoutSignal?: TimeoutSignalFactory;
   readonly onRequest?: () => void;
 }
 
 const DEFAULT_JEV_BASE_URL = "https://api.typesafe.ai";
+
+function rejectOnAbort(signal: AbortSignal): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    if (signal.aborted) {
+      reject(new JevAbortError());
+      return;
+    }
+    signal.addEventListener(
+      "abort",
+      () => {
+        reject(new JevAbortError());
+      },
+      { once: true },
+    );
+  });
+}
 
 function requirePositiveTimeout(timeoutMs: number, raw: number | undefined): number {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
@@ -64,6 +82,7 @@ export class HttpJevClient implements JevClient {
   readonly #model: string;
   readonly #timeoutMs: number;
   readonly #maxRetries: number;
+  readonly #timeoutSignal: TimeoutSignalFactory | undefined;
   readonly #onRequest: (() => void) | undefined;
 
   constructor(config: HttpJevClientConfig) {
@@ -80,6 +99,7 @@ export class HttpJevClient implements JevClient {
     this.#model = config.model ?? DEFAULT_JEV_MODEL;
     this.#timeoutMs = requirePositiveTimeout(config.timeoutMs ?? DEFAULT_JEV_TIMEOUT_MS, config.timeoutMs);
     this.#maxRetries = maxRetries;
+    this.#timeoutSignal = config.timeoutSignal;
     this.#onRequest = config.onRequest;
   }
 
@@ -112,20 +132,22 @@ export class HttpJevClient implements JevClient {
     callerSignal: AbortSignal | undefined,
     timeoutMs: number,
   ): Promise<NoulResult> {
-    const timeoutSignal = AbortSignal.timeout(timeoutMs);
-    const signal = callerSignal === undefined ? timeoutSignal : AbortSignal.any([callerSignal, timeoutSignal]);
+    const timeoutSignal = resolveTimeoutSignal(this.#timeoutSignal, timeoutMs);
     this.#onRequest?.();
     let response: HookFetchResponse;
     try {
-      response = await this.#fetch(http.url, {
+      const pending = this.#fetch(http.url, {
         method: http.method,
         headers: http.headers,
         body: http.body,
-        signal,
       });
+      const races: Promise<HookFetchResponse>[] = [pending];
+      if (timeoutSignal !== undefined) races.push(rejectOnAbort(timeoutSignal));
+      if (callerSignal !== undefined) races.push(rejectOnAbort(callerSignal));
+      response = await Promise.race(races);
     } catch (error) {
       if (callerSignal?.aborted === true) throw new JevAbortError("Jev request aborted", { cause: error });
-      if (timeoutSignal.aborted) {
+      if (timeoutSignal?.aborted === true) {
         throw new JevTimeoutError(timeoutMs, `Jev request timed out after ${String(timeoutMs)} ms`, { cause: error });
       }
       throw new JevRequestError(`Jev request could not connect: ${describeError(error)}`, {

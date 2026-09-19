@@ -1,5 +1,7 @@
 import { JevAbortError, JevBudgetError, JevTimeoutError } from "./jev-errors.js";
 import type { JevRequestOptions } from "./client.js";
+import { combineSignals, resolveTimeoutSignal } from "./timeout.js";
+import type { TimeoutSignalFactory } from "./timeout.js";
 import { DEFAULT_WINDOW_TOKENS, estimateJsonTokens } from "./tokens.js";
 
 export interface WindowItem {
@@ -72,6 +74,7 @@ export interface RunWindowsOptions {
   readonly concurrency?: number;
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
+  readonly timeoutSignal?: TimeoutSignalFactory;
 }
 
 export type WindowJudge<T, R> = (window: readonly T[], index: number, options: JevRequestOptions) => Promise<R>;
@@ -109,8 +112,8 @@ export async function runWindows<T, R>(
       if (index >= windows.length) return;
       const window = windows[index];
       if (window === undefined) return;
-      const timeout = AbortSignal.timeout(timeoutMs);
-      const signal = AbortSignal.any([controller.signal, timeout]);
+      const timeout = resolveTimeoutSignal(options.timeoutSignal, timeoutMs);
+      const signal = timeout === undefined ? controller.signal : combineSignals([controller.signal, timeout]);
       try {
         results[index] = await judge(window, index, { signal, timeoutMs });
       } catch (error) {
@@ -133,11 +136,11 @@ export async function runWindows<T, R>(
 function classifyWindowFailure(
   error: unknown,
   index: number,
-  timeout: AbortSignal,
+  timeout: AbortSignal | undefined,
   outer: AbortSignal | undefined,
   timeoutMs: number,
 ): Error {
-  if (timeout.aborted) {
+  if (timeout?.aborted === true) {
     return new JevTimeoutError(timeoutMs, `Jev window ${String(index + 1)} exceeded ${String(timeoutMs)} ms`, {
       cause: error,
     });

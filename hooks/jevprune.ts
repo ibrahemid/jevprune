@@ -3,7 +3,6 @@ import type { EngineInterface, On, PluginOptions, Register, ToolCallResult } fro
 import { createHookState, handleBashResult, resolveHookOptions } from "../src/core/hook.js";
 import type { HookDeps } from "../src/core/hook.js";
 import type { HookFetchInit, HookFetchResponse } from "../src/core/http-client.js";
-import { JevAbortError } from "../src/core/jev-errors.js";
 
 function readEnv($: EngineInterface, name: string): Promise<string | undefined> {
   if (name === "TYPESAFE_API_KEY") return $.env.get("TYPESAFE_API_KEY");
@@ -12,34 +11,16 @@ function readEnv($: EngineInterface, name: string): Promise<string | undefined> 
   return Promise.resolve(undefined);
 }
 
-function rejectOnAbort(signal: AbortSignal): Promise<never> {
-  return new Promise((_resolve, reject) => {
-    if (signal.aborted) {
-      reject(new JevAbortError());
-      return;
-    }
-    signal.addEventListener(
-      "abort",
-      () => {
-        reject(new JevAbortError());
-      },
-      { once: true },
-    );
-  });
-}
-
 async function fetchThroughHost(
   $: EngineInterface,
   url: string,
   init?: HookFetchInit,
 ): Promise<HookFetchResponse> {
-  const pending = $.http.fetch(url, {
+  const response = await $.http.fetch(url, {
     ...(init?.method === undefined ? {} : { method: init.method }),
     ...(init?.headers === undefined ? {} : { headers: { ...init.headers } }),
     ...(init?.body === undefined ? {} : { body: init.body }),
   });
-  const signal = init?.signal;
-  const response = signal === undefined ? await pending : await Promise.race([pending, rejectOnAbort(signal)]);
   return { status: response.status, ok: response.ok, text: response.text };
 }
 
@@ -64,6 +45,11 @@ function depsOf($: EngineInterface): HookDeps {
       },
       toast: (text, options) => {
         $.ui.toast(text, options);
+      },
+    },
+    clock: {
+      after: (ms, fn) => {
+        $.clock.after(ms, fn);
       },
     },
     process: { run: (argv) => $.process.run(argv) },

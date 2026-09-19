@@ -90,6 +90,31 @@ describe("runWindows", () => {
     ).rejects.toBeInstanceOf(JevTimeoutError);
   });
 
+  it("takes its window timeout from the injected factory", async () => {
+    const asked: number[] = [];
+    const controllers: AbortController[] = [];
+    const timeoutSignal = (ms: number): AbortSignal => {
+      asked.push(ms);
+      const controller = new AbortController();
+      controllers.push(controller);
+      return controller.signal;
+    };
+    const pending = runWindows(
+      [[{ id: "a", text: "" }]],
+      (_window, _index, options) =>
+        new Promise((_resolve, reject) => {
+          options.signal?.addEventListener("abort", () => {
+            reject(new Error("aborted by signal"));
+          });
+        }),
+      { timeoutMs: 40, timeoutSignal },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    controllers[0]?.abort();
+    await expect(pending).rejects.toBeInstanceOf(JevTimeoutError);
+    expect(asked).toEqual([40]);
+  });
+
   it("aborts the remaining windows after the first failure", async () => {
     const windows = Array.from({ length: 6 }, (_, i) => [{ id: String(i), text: "" }]);
     const started: number[] = [];

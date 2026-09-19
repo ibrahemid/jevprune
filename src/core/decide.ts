@@ -10,6 +10,7 @@ export type PassthroughReason =
   | "interrupted"
   | "recovery-read"
   | "fast-path"
+  | "oversize"
   | "binary"
   | "document"
   | "secret"
@@ -23,6 +24,8 @@ export interface PassthroughDecisionInput {
   readonly output: string;
   readonly lines: number;
   readonly fastPathLines: number;
+  readonly bytes: number;
+  readonly maxPruneBytes: number;
   readonly hasKey: boolean;
   readonly home: string;
 }
@@ -44,6 +47,7 @@ export function passthroughReason(input: PassthroughDecisionInput): PassthroughR
   if (isRecoveryRead(input.command, input.home)) return "recovery-read";
   if (input.lines <= input.fastPathLines) return "fast-path";
   if (looksSecret(input.command, input.output)) return "secret";
+  if (input.bytes > input.maxPruneBytes) return "oversize";
   if (looksBinary(input.output)) return "binary";
   if (isDocumentOutput(input.command, input.output)) return "document";
   if (!input.hasKey) return "no-key";

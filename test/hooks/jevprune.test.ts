@@ -292,6 +292,22 @@ describe("configuration", () => {
     expect(footerOf(fromOption)).toContain("200 → 200 lines");
   });
 
+  it("passes a result over maxPruneBytes through untouched", async () => {
+    const engine = createFakeEngine({
+      env: ENV,
+      files: { [`${HOME}/config.json`]: JSON.stringify({ maxPruneBytes: 512 }) },
+    });
+    const answer = inlineAnswer(buildLines(300, (n) => `step ${String(n)}`));
+
+    const outcome = await handle(engine.deps, answer, { options: { diagnostics: true } });
+
+    expect(outcome).toBe(answer);
+    expect(engine.requests).toHaveLength(0);
+    expect(engine.files.size).toBe(1);
+    expect(engine.toasts).toHaveLength(0);
+    expect(engine.logs).toEqual(["jevprune: passed through (oversize)"]);
+  });
+
   it("reads the config file under JEVPRUNE_HOME", async () => {
     const engine = createFakeEngine({
       env: { HOME: USER_HOME, JEVPRUNE_HOME: "/custom/home", TYPESAFE_API_KEY: API_KEY },
@@ -344,19 +360,46 @@ describe("persisted output", () => {
     expect(engine.files.get(`${HOME}/runs/${id}.log`)).toBe(text);
   });
 
-  it("passes through when the pruned text cannot fit the budget", async () => {
-    const text = buildLines(200, (n) => `step ${String(n)}`);
+  it("prunes past the engine preview the model was given", async () => {
+    const text = buildLines(300, (n) => `step ${String(n)} ${"y".repeat(40)}`);
     const engine = createFakeEngine({
       env: ENV,
       files: { [PERSISTED_PATH]: text },
-      noul: () => 1,
+      noul: (id) => (Number(id.slice(1)) <= 120 ? 1 : 0),
     });
-    const answer = persistedAnswer(text, "short");
+    const answer = persistedAnswer(text, text.slice(0, 2_000));
 
     const outcome = await handle(engine.deps, answer);
 
+    const pruned = stdoutOf(outcome);
+    expect(outcome).not.toBe(answer);
+    expect(pruned.length).toBeGreaterThan(2_000);
+    expect(footerOf(outcome)).toBe(
+      `jevprune: 300 → 161 lines, exit 0, full output ~/.jevprune/runs/${runIdOf(engine)}.log`,
+    );
+  });
+
+  it("passes through and leaves no run files when the kept text cannot fit the budget", async () => {
+    const text = buildLines(200, (n) => `step ${String(n)} ${"y".repeat(300)}`);
+    const engine = createFakeEngine({
+      env: ENV,
+      files: { [PERSISTED_PATH]: text },
+      httpStatus: 401,
+    });
+    const answer = persistedAnswer(text, text.slice(0, 2_000));
+
+    const outcome = await handle(engine.deps, answer, { options: { diagnostics: true } });
+
     expect(outcome).toBe(answer);
+    expect(engine.logs).toEqual(["jevprune: passed through (budget)"]);
+    expect([...engine.files.keys()].some((path) => path.includes("/runs/"))).toBe(false);
     expect(engine.files.has(`${HOME}/gain.jsonl`)).toBe(false);
+    expect(engine.processCalls).toContainEqual([
+      "rm",
+      "-f",
+      expect.stringContaining(`${HOME}/runs/`),
+      expect.stringContaining(`${HOME}/runs/`),
+    ]);
   });
 });
 
@@ -418,10 +461,49 @@ describe("archiving", () => {
 
     await handle(engine.deps, inlineAnswer(text));
 
+    const id = runIdOf(engine);
     expect(engine.processCalls).toEqual([
+      ["chmod", "600", `${HOME}/runs/${id}.log`],
+      ["chmod", "600", `${HOME}/runs/${id}.json`],
       ["rm", "-f", `${HOME}/runs/m1aaaaaa-1111.log`, `${HOME}/runs/m1aaaaaa-1111.json`],
     ]);
     expect(engine.files.has(`${HOME}/runs/m1aaaaaa-1111.log`)).toBe(false);
+  });
+
+  it("takes every request timeout from the engine clock", async () => {
+    const text = buildLines(200, (n) => `step ${String(n)}`);
+    const engine = createFakeEngine({
+      env: ENV,
+      files: { [`${HOME}/config.json`]: JSON.stringify({ windowTimeoutMs: 1_234 }) },
+      noul: () => 1,
+    });
+
+    await handle(engine.deps, inlineAnswer(text));
+
+    expect(engine.timers.length).toBeGreaterThan(0);
+    expect(engine.timers.every((timer) => timer.ms === 1_234)).toBe(true);
+  });
+
+  it("falls back when the engine clock fires the window timeout", async () => {
+    const text = buildLines(200, (n) => `step ${String(n)}`);
+    const engine = createFakeEngine({ env: ENV, fireTimers: true, noul: () => 1 });
+
+    const outcome = await handle(engine.deps, inlineAnswer(text));
+
+    expect(footerOf(outcome)).toContain("fallback (Jev unavailable: timeout)");
+  });
+
+  it("locks the run files to the owner", async () => {
+    const text = buildLines(200, (n) => `step ${String(n)}`);
+    const engine = createFakeEngine({ env: ENV, noul: (id) => (id === "l100" ? 1 : 0) });
+
+    await handle(engine.deps, inlineAnswer(text));
+
+    const id = runIdOf(engine);
+    expect(engine.processCalls).toEqual([
+      ["chmod", "600", `${HOME}/runs/${id}.log`],
+      ["chmod", "600", `${HOME}/runs/${id}.json`],
+    ]);
   });
 });
 
@@ -441,5 +523,28 @@ describe("failures", () => {
 
     expect(outcome).toBe(answer);
     expect(engine.logs).toEqual(["jevprune: passed through (error)"]);
+  });
+
+  it("removes the run files when the prune throws after the log was written", async () => {
+    const engine = createFakeEngine({ env: ENV, noul: (id) => (id === "l100" ? 1 : 0) });
+    let homeReads = 0;
+    const deps: HookDeps = {
+      ...engine.deps,
+      env: {
+        get: (name) => {
+          if (name !== "HOME") return engine.deps.env.get(name);
+          homeReads += 1;
+          if (homeReads > 1) return Promise.reject(new JevpruneError("the home directory is unreadable"));
+          return engine.deps.env.get(name);
+        },
+      },
+    };
+    const answer = inlineAnswer(buildLines(200, (n) => `step ${String(n)}`));
+
+    const outcome = await handle(deps, answer);
+
+    expect(outcome).toBe(answer);
+    expect([...engine.files.keys()].some((path) => path.includes("/runs/"))).toBe(false);
+    expect(engine.processCalls.some((argv) => argv[0] === "rm")).toBe(true);
   });
 });

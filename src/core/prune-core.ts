@@ -3,6 +3,7 @@ import type { ResolvedConfig } from "./config.js";
 import { buildRunRecord } from "./record.js";
 import type { RunRecordPlan } from "./record.js";
 import { selectLines } from "./select.js";
+import type { TimeoutSignalFactory } from "./timeout.js";
 import type { OversizeCapture, SelectionResult } from "./select.js";
 
 export interface PruneCoreInput {
@@ -18,6 +19,7 @@ export interface PruneCoreInput {
   readonly protect?: boolean;
   readonly oversize?: OversizeCapture;
   readonly signal?: AbortSignal;
+  readonly timeoutSignal?: TimeoutSignalFactory;
   readonly now: () => string;
   readonly argv?: readonly string[];
   readonly signalName?: string | null;
@@ -42,6 +44,7 @@ export async function pruneCore(input: PruneCoreInput): Promise<PruneCoreResult>
     runId: input.runId,
     ...(input.protect === undefined ? {} : { protect: input.protect }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
+    ...(input.timeoutSignal === undefined ? {} : { timeoutSignal: input.timeoutSignal }),
   });
   const plan = buildRunRecord({
     runId: input.runId,

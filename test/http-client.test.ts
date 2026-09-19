@@ -32,12 +32,7 @@ function transportOf(respond: (call: number) => { status: number; body: unknown 
   return { fetch, calls };
 }
 
-const hangingFetch: HookFetch = (_url, init) =>
-  new Promise<HookFetchResponse>((_resolve, reject) => {
-    init?.signal?.addEventListener("abort", () => {
-      reject(new JevAbortError("transport aborted"));
-    });
-  });
+const hangingFetch: HookFetch = () => new Promise<HookFetchResponse>(() => undefined);
 
 const REQUEST: NoulRequest = {
   state: { command: "pnpm test", lines: [{ n: 1, text: "ok" }] },
@@ -95,6 +90,14 @@ describe("HttpJevClient.noul request", () => {
       l1: { type: "noul", instructions: "Is line 1 needed?" },
       l2: { type: "noul", instructions: "Is line 2 needed?" },
     });
+  });
+
+  it("sends the engine's init members only, with no signal", async () => {
+    const transport = transportOf(() => ({ status: 200, body: OK_BODY }));
+    const controller = new AbortController();
+    await clientOf(transport.fetch).noul(REQUEST, { signal: controller.signal });
+    const init = transport.calls[0]?.init as Readonly<Record<string, unknown>> | undefined;
+    expect(Object.keys(init ?? {}).sort()).toEqual(["body", "headers", "method"]);
   });
 
   it("strips trailing slashes from a custom base url and sends the configured model", async () => {
@@ -237,6 +240,25 @@ describe("HttpJevClient.noul failures", () => {
     });
     await expect(client.noul(REQUEST, { signal: controller.signal })).rejects.toBeInstanceOf(JevAbortError);
     expect(requests).toBe(0);
+  });
+
+  it("times a request out through the injected signal factory", async () => {
+    const asked: number[] = [];
+    const client = new HttpJevClient({
+      apiKey: "apikey_test",
+      fetch: hangingFetch,
+      timeoutMs: 25,
+      maxRetries: 0,
+      timeoutSignal: (ms) => {
+        asked.push(ms);
+        const controller = new AbortController();
+        controller.abort();
+        return controller.signal;
+      },
+    });
+    const error = await client.noul(REQUEST).catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(JevTimeoutError);
+    expect(asked).toEqual([25]);
   });
 
   it("maps a timeout to JevTimeoutError", async () => {

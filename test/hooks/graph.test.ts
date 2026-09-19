@@ -34,6 +34,7 @@ const EXPECTED_GRAPH = [
   "src/core/store-writer.ts",
   "src/core/task.ts",
   "src/core/text.ts",
+  "src/core/timeout.ts",
   "src/core/tokens.ts",
   "src/core/types.ts",
   "src/core/windows.ts",
@@ -47,6 +48,8 @@ const BANNED = [
   { name: "setTimeout", pattern: /(?<![.\w$])setTimeout\s*\(/ },
   { name: "setInterval", pattern: /(?<![.\w$])setInterval\s*\(/ },
   { name: "console", pattern: /(?<![.\w$])console\s*\./ },
+  { name: "AbortSignal.timeout", pattern: /(?<![.\w$])AbortSignal\s*\.\s*timeout\b/ },
+  { name: "AbortSignal.any", pattern: /(?<![.\w$])AbortSignal\s*\.\s*any\b/ },
 ] as const;
 
 const IMPORT_SOURCE = /(?:^|[\s;])(import|export)\b([^;]*?)\bfrom\s*["']([^"']+)["']/gm;

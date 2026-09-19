@@ -12,6 +12,7 @@ import { looksSecret } from "./secrets.js";
 import { looksBinary, utf8Length } from "./text.js";
 import { estimateJsonTokens, estimateTokens } from "./tokens.js";
 import type { Decision, DroppedRange, FallbackReason, SelectionMode } from "./types.js";
+import type { TimeoutSignalFactory } from "./timeout.js";
 import { planWindows, runWindows } from "./windows.js";
 import type { WindowItem } from "./windows.js";
 
@@ -36,6 +37,7 @@ export interface SelectInput {
   readonly config: ResolvedConfig;
   readonly runId: string;
   readonly signal?: AbortSignal;
+  readonly timeoutSignal?: TimeoutSignalFactory;
   readonly protect?: boolean;
 }
 
@@ -236,6 +238,7 @@ async function askJev(candidates: readonly LineItem[], input: SelectInput, clien
       concurrency: input.config.concurrency,
       timeoutMs: input.config.windowTimeoutMs,
       ...(input.signal !== undefined ? { signal: input.signal } : {}),
+      ...(input.timeoutSignal !== undefined ? { timeoutSignal: input.timeoutSignal } : {}),
     },
   );
 

@@ -98,6 +98,7 @@ export type { PersistRunInput, PersistRunResult, RunFiles } from "./store-writer
 export { MAX_MESSAGE_TASK_CHARS, taskFromMessages } from "./task.js";
 export type { TaskMessage } from "./task.js";
 export { looksBinary, utf8Length } from "./text.js";
+export type { TimeoutSignalFactory } from "./timeout.js";
 export { CHARS_PER_TOKEN, DEFAULT_WINDOW_TOKENS, MAX_REQUEST_TOKENS, estimateJsonTokens, estimateTokens } from "./tokens.js";
 export type { Decision, DecisionReason, DroppedRange, FallbackReason, SelectionMode } from "./types.js";
 export {

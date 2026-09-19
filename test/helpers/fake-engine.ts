@@ -11,6 +11,11 @@ export interface FakeRequest {
   readonly body: string;
 }
 
+export interface FakeTimer {
+  readonly ms: number;
+  fire(): void;
+}
+
 export interface FakeToast {
   readonly text: string;
   readonly timeoutMs: number | undefined;
@@ -24,6 +29,7 @@ export interface FakeEngine {
   readonly toastCalls: FakeToast[];
   readonly requests: FakeRequest[];
   readonly processCalls: (readonly string[])[];
+  readonly timers: FakeTimer[];
 }
 
 export interface FakeEngineOptions {
@@ -35,6 +41,7 @@ export interface FakeEngineOptions {
   readonly noul?: NoulScorer;
   readonly httpStatus?: number;
   readonly failWrite?: (path: string) => Error | undefined;
+  readonly fireTimers?: boolean;
 }
 
 const DEFAULT_CWD = "/work";
@@ -47,6 +54,7 @@ export function createFakeEngine(options: FakeEngineOptions = {}): FakeEngine {
   const toastCalls: FakeToast[] = [];
   const requests: FakeRequest[] = [];
   const processCalls: (readonly string[])[] = [];
+  const timers: FakeTimer[] = [];
   const scorer = options.noul ?? KEEP_EVERYTHING;
   const status = options.httpStatus ?? 200;
 
@@ -84,6 +92,12 @@ export function createFakeEngine(options: FakeEngineOptions = {}): FakeEngine {
         toastCalls.push({ text, timeoutMs: toastOptions?.timeoutMs });
       },
     },
+    clock: {
+      after: (ms, fn) => {
+        timers.push({ ms, fire: fn });
+        if (options.fireTimers === true) fn();
+      },
+    },
     process: {
       run: (argv) => {
         processCalls.push(argv);
@@ -93,7 +107,7 @@ export function createFakeEngine(options: FakeEngineOptions = {}): FakeEngine {
     },
   };
 
-  return { deps, files, logs, toasts, toastCalls, requests, processCalls };
+  return { deps, files, logs, toasts, toastCalls, requests, processCalls, timers };
 }
 
 function listDirectory(files: ReadonlyMap<string, string>, path: string): FsEntry[] {

@@ -13,6 +13,8 @@ const BASE: PassthroughDecisionInput = {
   output: "line one\nline two\n",
   lines: 400,
   fastPathLines: 40,
+  bytes: 8_192,
+  maxPruneBytes: 16_777_216,
   hasKey: true,
   home: HOME,
 };
@@ -50,6 +52,31 @@ describe("passthroughReason", () => {
   it("passes output at or under the fast-path line count through", () => {
     expect(decide({ lines: 40 })).toBe("fast-path");
     expect(decide({ lines: 39 })).toBe("fast-path");
+  });
+
+  it("passes output over the byte limit through", () => {
+    expect(decide({ bytes: 4_097, maxPruneBytes: 4_096 })).toBe("oversize");
+  });
+
+  it("prunes output at the byte limit", () => {
+    expect(decide({ bytes: 4_096, maxPruneBytes: 4_096 })).toBeNull();
+  });
+
+  it("reports the fast path ahead of the byte limit", () => {
+    expect(decide({ lines: 12, bytes: 4_097, maxPruneBytes: 4_096 })).toBe("fast-path");
+  });
+
+  it("reports the byte limit ahead of binary and document output", () => {
+    expect(decide({ output: "header\u0000\u0001\u0002payload", bytes: 4_097, maxPruneBytes: 4_096 })).toBe(
+      "oversize",
+    );
+    expect(
+      decide({ command: "jq . package.json", output: '{\n  "name": "app"\n}\n', bytes: 4_097, maxPruneBytes: 4_096 }),
+    ).toBe("oversize");
+  });
+
+  it("reports a secret ahead of the byte limit", () => {
+    expect(decide({ output: "api_key: sk-live-3f9c2a\n", bytes: 4_097, maxPruneBytes: 4_096 })).toBe("secret");
   });
 
   it("passes binary output through", () => {

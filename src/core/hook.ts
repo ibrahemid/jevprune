@@ -22,11 +22,14 @@ import type { RunFiles } from "./store-writer.js";
 import { taskFromMessages } from "./task.js";
 import type { TaskMessage } from "./task.js";
 import { utf8Length } from "./text.js";
+import type { TimeoutSignalFactory } from "./timeout.js";
 
 const USER_HOME_ENV = "HOME";
 const HOME_DIR_NAME = ".jevprune";
 const TOAST_TIMEOUT_MS = 8_000;
 const MAX_REMOVE_PATHS = 50;
+const PERSISTED_MAX_CHARS = 16_000;
+const RUN_FILE_MODE = "600";
 const MISSING_KEY_LINE = "jevprune: TYPESAFE_API_KEY not set, results pass through";
 const CONFIG_IGNORED_LINE = "jevprune: config file ignored";
 const RUN_FILE_EXTENSIONS = [".log", ".json"] as const;
@@ -38,6 +41,10 @@ export interface HookOptions {
 }
 
 export type HookPluginOptions = Readonly<Record<string, unknown>>;
+
+export interface HookClock {
+  after(ms: number, fn: () => void): void;
+}
 
 export interface HookUi {
   log(text: string): void;
@@ -60,6 +67,7 @@ export interface HookDeps {
     cwd(): Promise<string>;
   };
   readonly ui: HookUi;
+  readonly clock: HookClock;
   readonly process?: { run(argv: readonly string[]): Promise<unknown> };
 }
 
@@ -193,6 +201,7 @@ async function pruneBashResult(
   const home = await resolveHookHome(deps);
   const config = await loadHookConfig(deps, home, options);
   const apiKey = await resolveApiKey(deps, options);
+  const bytes = utf8Length(combined);
 
   const reason = passthroughReason({
     denied: false,
@@ -202,6 +211,8 @@ async function pruneBashResult(
     output: combined,
     lines: splitLines(combined).length,
     fastPathLines: config.fastPathLines,
+    bytes,
+    maxPruneBytes: config.maxPruneBytes,
     hasKey: apiKey !== undefined,
     home,
   });
@@ -217,94 +228,128 @@ async function pruneBashResult(
   const runId = newRunId();
   const logPath = runLogPath(home, runId);
   const archive = createLogArchive(deps.fs, logPath, combined);
-  const client = new HttpJevClient({
-    apiKey,
-    fetch: deps.http.fetch,
-    timeoutMs: config.windowTimeoutMs,
-    onRequest: () => {
-      archive.start();
-    },
-  });
-
-  const task = taskFromMessages(await deps.session.messages(), event.command);
-  const { selection, plan } = await pruneCore({
-    text: combined,
-    task,
-    command: event.command,
-    exitCode: 0,
-    client,
-    config,
-    runId,
-    bytes: utf8Length(combined),
-    now: () => new Date().toISOString(),
-  });
-
-  if (!archive.wasStarted() && plan.persistLog) archive.start();
-  const logFailureCode = await archive.settle();
-  const savedLogPath = archive.wasStarted() && logFailureCode === undefined ? logPath : undefined;
-  const userHome = await deps.env.get(USER_HOME_ENV);
-
-  let kept = selection.kept;
-  let linesOut = selection.linesOut;
-  let footer = buildFooter({
-    selection,
-    linesOut,
-    userHome,
-    logPath: savedLogPath,
-    failureCode: logFailureCode,
-  });
-
-  const maxChars = persisted === undefined ? Number.POSITIVE_INFINITY : (answer.text?.length ?? Number.POSITIVE_INFINITY);
-  if (withFooter(kept, footer).length > maxChars) {
-    if (selection.mode !== "jev") return passThrough(deps, options, answer, "budget");
-    const refit = refitToBudget({
-      lines: splitLines(combined),
-      decisions: selection.decisions,
-      runId,
-      minCollapseLines: config.minCollapseLines,
-      footer,
-      maxChars,
-      startThreshold: config.threshold,
+  let runFilesKept = false;
+  try {
+    const timeoutSignal = timeoutSignalFrom(deps.clock);
+    const client = new HttpJevClient({
+      apiKey,
+      fetch: deps.http.fetch,
+      timeoutMs: config.windowTimeoutMs,
+      timeoutSignal,
+      onRequest: () => {
+        archive.start();
+      },
     });
-    if (refit === null) return passThrough(deps, options, answer, "budget");
-    kept = refit.kept;
-    linesOut = refit.linesOut;
+
+    const task = taskFromMessages(await deps.session.messages(), event.command);
+    const { selection, plan } = await pruneCore({
+      text: combined,
+      task,
+      command: event.command,
+      exitCode: 0,
+      client,
+      config,
+      runId,
+      bytes,
+      timeoutSignal,
+      now: () => new Date().toISOString(),
+    });
+
+    if (!archive.wasStarted() && plan.persistLog) archive.start();
+    const logFailureCode = await archive.settle();
+    const savedLogPath = archive.wasStarted() && logFailureCode === undefined ? logPath : undefined;
+    if (savedLogPath !== undefined) await setRunFileMode(deps, savedLogPath);
+    const userHome = await deps.env.get(USER_HOME_ENV);
+
+    let kept = selection.kept;
+    let linesOut = selection.linesOut;
+    let footer = buildFooter({
+      selection,
+      linesOut,
+      userHome,
+      logPath: savedLogPath,
+      failureCode: logFailureCode,
+    });
+
+    const maxChars = persisted === undefined ? Number.POSITIVE_INFINITY : PERSISTED_MAX_CHARS;
+    if (withFooter(kept, footer).length > maxChars) {
+      if (selection.mode !== "jev") return passThrough(deps, options, answer, "budget");
+      const refit = refitToBudget({
+        lines: splitLines(combined),
+        decisions: selection.decisions,
+        runId,
+        minCollapseLines: config.minCollapseLines,
+        footer,
+        maxChars,
+        startThreshold: config.threshold,
+      });
+      if (refit === null) return passThrough(deps, options, answer, "budget");
+      kept = refit.kept;
+      linesOut = refit.linesOut;
+    }
+
+    const persistedRun = await persistRun({
+      files: deps.fs,
+      home,
+      plan: refitPlan(plan, linesOut, kept),
+      ...(savedLogPath === undefined ? {} : { logAlreadyAt: savedLogPath }),
+    });
+    if (persistedRun.failureCode === undefined) await setRunFileMode(deps, runMetaPath(home, runId));
+    await enforceHookRetention(deps, home, config.retention).catch(() => undefined);
+
+    const failureCode = logFailureCode ?? persistedRun.failureCode;
+    footer = buildFooter({
+      selection,
+      linesOut,
+      userHome,
+      logPath: persistedRun.logPath,
+      failureCode,
+    });
+    const stdout = withFooter(kept, footer);
+    if (stdout.length > maxChars) return passThrough(deps, options, answer, "budget");
+
+    deps.ui.toast(
+      `jevprune: ${formatCount(selection.linesIn)} → ${formatCount(linesOut)} lines, run ${runId}`,
+      { timeoutMs: TOAST_TIMEOUT_MS },
+    );
+    logDiagnostic(
+      deps,
+      options,
+      `jevprune: ${formatCount(selection.linesIn)} → ${formatCount(linesOut)} lines, run ${runId}, ` +
+        `${String(selection.jevRequests)} requests, ${String(durationMs(plan))} ms`,
+    );
+
+    const result: Record<string, unknown> = { ...record, stdout, stderr: "" };
+    delete result["persistedOutputPath"];
+    delete result["persistedOutputSize"];
+    runFilesKept = true;
+    return { result };
+  } finally {
+    if (!runFilesKept) await abandonRun(deps, home, runId, archive);
   }
+}
 
-  const persistedRun = await persistRun({
-    files: deps.fs,
-    home,
-    plan: refitPlan(plan, linesOut, kept),
-    ...(savedLogPath === undefined ? {} : { logAlreadyAt: savedLogPath }),
-  });
-  await enforceHookRetention(deps, home, config.retention).catch(() => undefined);
+function timeoutSignalFrom(clock: HookClock): TimeoutSignalFactory {
+  return (ms: number): AbortSignal => {
+    const controller = new AbortController();
+    clock.after(ms, () => {
+      controller.abort();
+    });
+    return controller.signal;
+  };
+}
 
-  const failureCode = logFailureCode ?? persistedRun.failureCode;
-  footer = buildFooter({
-    selection,
-    linesOut,
-    userHome,
-    logPath: persistedRun.logPath,
-    failureCode,
-  });
-  const stdout = withFooter(kept, footer);
-  if (stdout.length > maxChars) return passThrough(deps, options, answer, "budget");
+async function setRunFileMode(deps: HookDeps, path: string): Promise<void> {
+  const runner = deps.process;
+  if (runner === undefined) return;
+  await runner.run(["chmod", RUN_FILE_MODE, path]).catch(() => undefined);
+}
 
-  deps.ui.toast(
-    `jevprune: ${formatCount(selection.linesIn)} → ${formatCount(linesOut)} lines, run ${runId}`,
-    { timeoutMs: TOAST_TIMEOUT_MS },
-  );
-  logDiagnostic(
-    deps,
-    options,
-    `jevprune: ${formatCount(selection.linesIn)} → ${formatCount(linesOut)} lines, run ${runId}, ` +
-      `${String(selection.jevRequests)} requests, ${String(durationMs(plan))} ms`,
-  );
-
-  const result: Record<string, unknown> = { ...record, stdout, stderr: "" };
-  delete result["persistedOutputPath"];
-  delete result["persistedOutputSize"];
-  return { result };
+async function abandonRun(deps: HookDeps, home: string, runId: string, archive: LogArchive): Promise<void> {
+  await archive.settle().catch(() => undefined);
+  const runner = deps.process;
+  if (runner === undefined) return;
+  await runner.run(["rm", "-f", runLogPath(home, runId), runMetaPath(home, runId)]).catch(() => undefined);
 }
 
 async function enforceHookRetention(
