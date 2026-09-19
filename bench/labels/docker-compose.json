@@ -1,0 +1,11 @@
+{
+  "task": "which grafana plugins were installed and how long did each take",
+  "command": "docker compose up",
+  "needed": [2930, 2935, 2940, 2974],
+  "why": {
+    "2930": "grafana-lokiexplore-app installed, with its duration",
+    "2935": "grafana-pyroscope-app installed, with its duration",
+    "2940": "grafana-exploretraces-app installed, with its duration",
+    "2974": "grafana-metricsdrilldown-app installed, with its duration"
+  }
+}

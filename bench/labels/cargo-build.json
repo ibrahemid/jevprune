@@ -1,0 +1,18 @@
+{
+  "task": "why does the build warn",
+  "command": "cargo build",
+  "needed": [833, 834, 836, 837, 839, 841, 842, 844, 845, 847, 863],
+  "why": {
+    "833": "first warning: unused variable retries",
+    "834": "source location of the first warning",
+    "836": "the offending line of code",
+    "837": "the span and the suggested fix",
+    "839": "the lint that produced the first warning",
+    "841": "second warning: normalize_path is never used",
+    "842": "source location of the second warning",
+    "844": "the offending line of code",
+    "845": "the span the warning points at",
+    "847": "the lint that produced the second warning",
+    "863": "warning count for the crate"
+  }
+}

@@ -1,5 +1,7 @@
 node_modules/
 dist/
+.bench/
+bench/report.json
 .env
 .env.*
 !.env.example

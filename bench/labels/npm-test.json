@@ -1,0 +1,20 @@
+{
+  "task": "fix the failing auth test",
+  "command": "npm test",
+  "needed": [514, 2955, 2956, 2958, 2959, 2961, 2962, 2964, 2965, 2967, 2969, 2975, 2976],
+  "why": {
+    "514": "the test marked failed where it ran, mid-log",
+    "2955": "the failing test: file, suite and test name",
+    "2956": "assertion message, expected 401 and got 200",
+    "2958": "labels the expected side of the diff",
+    "2959": "labels the received side of the diff",
+    "2961": "expected value",
+    "2962": "received value",
+    "2964": "stack frame in project code, login.test.ts:88:29",
+    "2965": "the call under test in the source frame",
+    "2967": "the assertion that failed",
+    "2969": "the second assertion in the same test",
+    "2975": "summary count of failed and passed test files",
+    "2976": "summary count of failed and passed tests"
+  }
+}

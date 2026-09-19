@@ -39,6 +39,7 @@
     "typecheck:hooks": "tsc -p tsconfig.hooks.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
+    "bench": "tsup --config tsup.bench.config.ts && node .bench/run.js",
     "gate": "scripts/gate.sh",
     "prepublishOnly": "scripts/gate.sh && tsup"
   },

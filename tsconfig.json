@@ -20,5 +20,5 @@
     "noEmit": true,
     "baseUrl": "."
   },
-  "include": ["src", "test", "tsup.config.ts", "vitest.config.ts", "eslint.config.js"]
+  "include": ["src", "test", "bench", "tsup.config.ts", "tsup.bench.config.ts", "vitest.config.ts", "eslint.config.js"]
 }
