@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { displayPath, formatCount, formatFooter, withFooter } from "../src/footer.js";
+import { formatFooter } from "../src/core/footer.js";
+import { displayPath, formatCount, withFooter } from "../src/footer.js";
 
 describe("formatFooter", () => {
   it("reports a jev run with the log path", () => {
@@ -11,7 +12,7 @@ describe("formatFooter", () => {
         linesOut: 88,
         exitCode: 0,
         logPath: "/home/dev/.jevprune/runs/abc-1234.log",
-        home: "/home/dev",
+        userHome: "/home/dev",
       }),
     ).toBe("jevprune: 3,104 → 88 lines, exit 0, full output ~/.jevprune/runs/abc-1234.log");
   });
@@ -25,7 +26,7 @@ describe("formatFooter", () => {
         exitCode: 0,
         fallbackReason: { kind: "unavailable", detail: "timeout" },
         logPath: "/tmp/runs/abc-1234.log",
-        home: "/home/dev",
+        userHome: "/home/dev",
       }),
     ).toBe("jevprune: fallback (Jev unavailable: timeout), 3,104 → 83 lines, exit 0, full output /tmp/runs/abc-1234.log");
   });
@@ -39,7 +40,7 @@ describe("formatFooter", () => {
         exitCode: 0,
         fallbackReason: { kind: "size-limit", maxBytes: 1_048_576 },
         logPath: "/tmp/runs/abc-1234.log",
-        home: "/home/dev",
+        userHome: "/home/dev",
       }),
     ).toBe("jevprune: fallback (output over 1048576 bytes), 3,104 → 83 lines, exit 0, full output /tmp/runs/abc-1234.log");
   });

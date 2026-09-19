@@ -6,7 +6,7 @@ import type { Readable } from "node:stream";
 import { isValidUtf8 } from "./bytes.js";
 import { OutputCapture } from "./capture.js";
 import type { CapturedOutput } from "./capture.js";
-import { RunStoreError, SpawnError, UsageError, errorCode, errorMessage } from "./errors.js";
+import { RunStoreError, SpawnError, UsageError, errorCode, errorMessage } from "./core/errors.js";
 import type { RunStore, RunWriter } from "./store.js";
 
 type CapturedChild = ChildProcessByStdio<null, Readable, Readable>;

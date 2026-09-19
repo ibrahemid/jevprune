@@ -3,12 +3,12 @@
   "owner": {
     "name": "ibrahemid"
   },
-  "description": "Adds a skill for running jevprune and recovering dropped ranges. Includes an optional Bash rewrite hook.",
+  "description": "Prunes long Bash results per line before the model reads them, and recovers dropped ranges by run id.",
   "plugins": [
     {
       "name": "jevprune",
       "source": "./",
-      "description": "Adds a skill for running jevprune and recovering dropped ranges. Includes an optional Bash rewrite hook."
+      "description": "Prunes long Bash results per line before the model reads them, and recovers dropped ranges by run id."
     }
   ]
 }

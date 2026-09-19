@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { joinLines, splitLines } from "../src/lines.js";
+import { joinLines, splitLines } from "../src/core/lines.js";
 
 function seeded(seed: number): () => number {
   let state = seed;

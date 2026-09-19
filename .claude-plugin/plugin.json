@@ -1,11 +1,31 @@
 {
   "name": "jevprune",
   "version": "0.1.1",
-  "description": "Adds a skill for running jevprune and recovering dropped ranges. Includes an optional Bash rewrite hook.",
+  "description": "Prunes long Bash results per line before the model reads them, and recovers dropped ranges by run id.",
   "author": {
     "name": "ibrahemid"
   },
   "repository": "https://github.com/ibrahemid/jevprune",
   "license": "MIT",
-  "keywords": ["claude-code", "bash", "output", "context", "tokens", "jev"]
+  "keywords": ["claude-code", "bash", "output", "context", "tokens", "jev"],
+  "userConfig": {
+    "apiKey": {
+      "type": "string",
+      "title": "TypeSafe API key",
+      "description": "TypeSafe API key. Leave unset to use TYPESAFE_API_KEY.",
+      "sensitive": true
+    },
+    "threshold": {
+      "type": "number",
+      "title": "Keep threshold",
+      "description": "Minimum Jev score, 0 to 1, for a line to stay visible.",
+      "default": 0.3
+    },
+    "diagnostics": {
+      "type": "boolean",
+      "title": "Log pruning decisions",
+      "description": "Log the reason a result was passed through, the line counts and the request count. Never the command or the output.",
+      "default": false
+    }
+  }
 }

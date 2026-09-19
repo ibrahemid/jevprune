@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createJevClientFromEnv } from "../src/core/index.js";
+import { createJevClientFromEnv } from "../src/typesafe-client.js";
 import { pruneOutput } from "../src/prune.js";
 import { homeEnv, makeHome, removeHome } from "./helpers/env.js";
 

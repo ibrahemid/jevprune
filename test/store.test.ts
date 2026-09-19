@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { LineRangeError, RunNotFoundError, RunStoreError } from "../src/errors.js";
+import { LineRangeError, RunNotFoundError, RunStoreError } from "../src/core/errors.js";
 import { RUN_ID_PATTERN, RunStore, newRunId } from "../src/store.js";
 import type { RunMeta } from "../src/store.js";
 import { makeHome, removeHome } from "./helpers/env.js";

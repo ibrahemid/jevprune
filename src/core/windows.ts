@@ -1,5 +1,5 @@
-import { JevAbortError, JevBudgetError, JevTimeoutError } from "./errors.js";
-import type { JevRequestOptions } from "./jev-client.js";
+import { JevAbortError, JevBudgetError, JevTimeoutError } from "./jev-errors.js";
+import type { JevRequestOptions } from "./client.js";
 import { DEFAULT_WINDOW_TOKENS, estimateJsonTokens } from "./tokens.js";
 
 export interface WindowItem {

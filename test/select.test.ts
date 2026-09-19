@@ -10,8 +10,8 @@ import {
   estimateJsonTokens,
 } from "../src/core/index.js";
 import type { NoulScorer } from "../src/core/index.js";
-import { splitLines } from "../src/lines.js";
-import { selectLines } from "../src/select.js";
+import { splitLines } from "../src/core/lines.js";
+import { selectLines } from "../src/core/select.js";
 
 interface WindowState {
   readonly command: string;

@@ -2,15 +2,17 @@ import { OutputCapture, captureBytes } from "./capture.js";
 import type { CapturedOutput } from "./capture.js";
 import { loadConfig } from "./config.js";
 import type { Config, ResolvedConfig } from "./config.js";
-import { JevConfigError, createJevClientFromEnv } from "./core/index.js";
+import { JevConfigError } from "./core/index.js";
 import type { JevClient } from "./core/index.js";
-import { RunStoreError } from "./errors.js";
+import { RunStoreError } from "./core/errors.js";
 import { formatFooter } from "./footer.js";
-import { fallbackReasonText, selectLines } from "./select.js";
-import type { SelectionResult } from "./select.js";
+import { buildRunRecord } from "./core/record.js";
+import { pruneCore } from "./core/prune-core.js";
+import type { SelectionResult } from "./core/select.js";
 import { RunStore, newRunId } from "./store.js";
 import type { RunMeta, RunWriter } from "./store.js";
-import type { DroppedRange, FallbackReason, SelectionMode } from "./types.js";
+import type { DroppedRange, FallbackReason, SelectionMode } from "./core/types.js";
+import { createJevClientFromEnv } from "./typesafe-client.js";
 
 export interface PruneInput {
   readonly text: string;
@@ -74,6 +76,7 @@ export interface RecordRunInput {
   readonly logBytes?: Buffer;
   readonly passthroughNote?: string;
   readonly storeFailureCode?: string;
+  readonly archive?: boolean;
 }
 
 export interface RecordRunResult {
@@ -133,37 +136,32 @@ export async function pruneStream(input: PruneStreamInput): Promise<PruneResult>
 
 export async function recordRun(input: RecordRunInput): Promise<RecordRunResult> {
   const { store, selection, meta } = input;
-  const fastPath = selection.mode === "fast-path";
+  const plan = buildRunRecord({
+    runId: meta.id,
+    command: meta.command,
+    argv: meta.argv,
+    task: meta.task,
+    startedAt: meta.startedAt,
+    endedAt: meta.endedAt,
+    exitCode: meta.exitCode,
+    signal: meta.signal,
+    bytes: meta.bytes,
+    selection,
+  });
+  const archive = input.archive !== false;
+  const keepLog = plan.persistLog && archive;
   const log = input.logBytes ?? (input.logText !== undefined ? Buffer.from(input.logText, "utf8") : undefined);
   let failureCode = input.storeFailureCode;
 
   if (store !== null && failureCode === undefined) {
     try {
-      if (fastPath) {
-        if (log === undefined) await store.discardRun(meta.id);
-      } else {
+      if (keepLog) {
         if (log !== undefined) await writeLog(store, meta.id, log);
-        await store.finalizeRun(meta.id, {
-          ...meta,
-          mode: selection.mode,
-          linesOut: selection.linesOut,
-          ...(selection.fallbackReason !== undefined
-            ? { fallbackReason: fallbackReasonText(selection.fallbackReason) }
-            : {}),
-        });
+        await store.finalizeRun(meta.id, plan.meta);
+      } else if (!archive || log === undefined) {
+        await store.discardRun(meta.id);
       }
-      await store.appendGain({
-        ts: new Date().toISOString(),
-        id: meta.id,
-        mode: selection.mode,
-        linesIn: selection.linesIn,
-        linesOut: selection.linesOut,
-        bytesIn: selection.bytesIn,
-        bytesOut: selection.bytesOut,
-        ...(selection.fallbackReason !== undefined
-          ? { reason: fallbackReasonText(selection.fallbackReason) }
-          : {}),
-      });
+      await store.appendGain(plan.gain);
       await store.enforceRetention();
     } catch (error) {
       if (!(error instanceof RunStoreError)) throw error;
@@ -171,7 +169,7 @@ export async function recordRun(input: RecordRunInput): Promise<RecordRunResult>
     }
   }
 
-  const logPath = store !== null && !fastPath && failureCode === undefined ? store.logPath(meta.id) : undefined;
+  const logPath = store !== null && keepLog && failureCode === undefined ? store.logPath(meta.id) : undefined;
   const footer = formatFooter({
     mode: selection.mode,
     linesIn: selection.linesIn,
@@ -217,7 +215,7 @@ async function prepare(input: Omit<PruneInput, "text">): Promise<PruneContext> {
 
 async function selectAndRecord(input: SelectAndRecordInput): Promise<PruneResult> {
   const { prepared, capture } = input;
-  const selection = await selectLines({
+  const { selection, plan } = await pruneCore({
     text: input.text,
     task: input.task,
     command: prepared.command,
@@ -228,6 +226,8 @@ async function selectAndRecord(input: SelectAndRecordInput): Promise<PruneResult
     client: prepared.client,
     config: prepared.config,
     runId: prepared.runId,
+    bytes: capture.bytes,
+    now: () => new Date().toISOString(),
   });
 
   const recorded = await recordRun({
@@ -240,7 +240,7 @@ async function selectAndRecord(input: SelectAndRecordInput): Promise<PruneResult
       command: prepared.command,
       argv: [],
       startedAt: input.startedAt,
-      endedAt: new Date().toISOString(),
+      endedAt: plan.meta.endedAt,
       exitCode: input.exitCode,
       signal: null,
       bytes: capture.bytes,

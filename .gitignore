@@ -6,3 +6,4 @@ dist/
 *.tgz
 coverage/
 .status/
+*.tmp.mjs

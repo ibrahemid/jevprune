@@ -3,8 +3,8 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { SpawnError, UsageError } from "../src/errors.js";
-import { splitLines } from "../src/lines.js";
+import { SpawnError, UsageError } from "../src/core/errors.js";
+import { splitLines } from "../src/core/lines.js";
 import { runCommand } from "../src/runner.js";
 import { RunStore, newRunId } from "../src/store.js";
 import { makeHome, removeHome } from "./helpers/env.js";

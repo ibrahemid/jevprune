@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { DEFAULT_CONFIG, loadConfig, resolveHome } from "../src/config.js";
-import { ConfigError } from "../src/errors.js";
+import { ConfigError } from "../src/core/errors.js";
 import { homeEnv, makeHome, removeHome } from "./helpers/env.js";
 
 let home = "";
@@ -35,13 +35,11 @@ describe("loadConfig", () => {
     const config = await loadConfig(homeEnv(home));
     expect(config).toEqual({ ...DEFAULT_CONFIG, home });
     expect(config.threshold).toBe(0.3);
-    expect(config.autoWrap).toBe(false);
   });
 
-  it("enables autoWrap only when the file asks for it", async () => {
-    await writeConfig({ autoWrap: true });
-    const config = await loadConfig(homeEnv(home));
-    expect(config.autoWrap).toBe(true);
+  it("accepts and ignores the removed autoWrap and allowlist keys", async () => {
+    await writeConfig({ autoWrap: true, allowlist: ["ls"] });
+    expect(await loadConfig(homeEnv(home))).toEqual({ ...DEFAULT_CONFIG, home });
   });
 
   it("overrides only the keys present in the file", async () => {
@@ -69,8 +67,6 @@ describe("loadConfig", () => {
       [{ tailLines: 1.5 }, /config key "tailLines" must be an integer >= 0, got 1.5/],
       [{ minCollapseLines: 0 }, /config key "minCollapseLines" must be an integer >= 1, got 0/],
       [{ windowTokens: 0 }, /config key "windowTokens" must be an integer >= 1, got 0/],
-      [{ autoWrap: "yes" }, /config key "autoWrap" must be a boolean, got "yes"/],
-      [{ allowlist: ["ls", 2] }, /config key "allowlist" must be an array of strings, got \["ls",2\]/],
       [{ retention: 4 }, /config key "retention" must be an object, got 4/],
       [{ retention: { maxBytes: 0 } }, /config key "retention.maxBytes" must be an integer >= 1, got 0/],
     ];

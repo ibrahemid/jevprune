@@ -10,68 +10,37 @@ import {
   choice,
   noul,
 } from "@typesafe-ai/sdk";
-import type { ChoiceQuestion, EntryType, Fetch, NoulQuestion, RequestOptions } from "@typesafe-ai/sdk";
+import type { ChoiceQuestion, Fetch, NoulQuestion, RequestOptions } from "@typesafe-ai/sdk";
 
+import {
+  DEFAULT_JEV_MAX_RETRIES,
+  DEFAULT_JEV_MODEL,
+  DEFAULT_JEV_TIMEOUT_MS,
+  TYPESAFE_API_KEY_ENV,
+  TYPESAFE_BASE_URL_ENV,
+  readModel,
+  readUsage,
+  requireIds,
+  validateChoiceAnswers,
+  validateNoulAnswers,
+} from "./core/client.js";
+import type {
+  ChoiceQuestionSpec,
+  ChoiceRequest,
+  ChoiceResult,
+  JevClient,
+  JevRequestOptions,
+  NoulRequest,
+  NoulResult,
+} from "./core/client.js";
 import {
   JevAbortError,
   JevConfigError,
   JevInputError,
   JevRequestError,
-  JevResponseError,
   JevTimeoutError,
   describeError,
-} from "./errors.js";
-
-export type JevState = EntryType;
-
-export interface JevUsage {
-  readonly inputTokens: number;
-  readonly outputTokens: number;
-}
-
-export interface NoulRequest {
-  readonly state: JevState;
-  readonly questions: Readonly<Record<string, string>>;
-}
-
-export interface NoulResult {
-  readonly model: string;
-  readonly answers: Readonly<Record<string, number>>;
-  readonly usage: JevUsage;
-}
-
-export interface ChoiceQuestionSpec<L extends string> {
-  readonly instructions: string;
-  readonly labels: readonly L[];
-  readonly descriptions?: Readonly<Partial<Record<L, string>>>;
-}
-
-export interface ChoiceRequest<L extends string> {
-  readonly state: JevState;
-  readonly questions: Readonly<Record<string, ChoiceQuestionSpec<L>>>;
-}
-
-export interface ChoiceAnswer<L extends string> {
-  readonly choice: L;
-  readonly confidence: number;
-  readonly probabilities: Readonly<Record<L, number>>;
-}
-
-export interface ChoiceResult<L extends string> {
-  readonly model: string;
-  readonly answers: Readonly<Record<string, ChoiceAnswer<L>>>;
-  readonly usage: JevUsage;
-}
-
-export interface JevRequestOptions {
-  readonly signal?: AbortSignal;
-  readonly timeoutMs?: number;
-}
-
-export interface JevClient {
-  noul(request: NoulRequest, options?: JevRequestOptions): Promise<NoulResult>;
-  choice<L extends string>(request: ChoiceRequest<L>, options?: JevRequestOptions): Promise<ChoiceResult<L>>;
-}
+} from "./core/jev-errors.js";
 
 export interface TypeSafeJevClientConfig {
   readonly apiKey: string;
@@ -81,12 +50,6 @@ export interface TypeSafeJevClientConfig {
   readonly maxRetries?: number;
   readonly fetch?: Fetch;
 }
-
-export const DEFAULT_JEV_MODEL = "jev-latest";
-export const DEFAULT_JEV_TIMEOUT_MS = 10_000;
-export const DEFAULT_JEV_MAX_RETRIES = 1;
-export const TYPESAFE_API_KEY_ENV = "TYPESAFE_API_KEY";
-export const TYPESAFE_BASE_URL_ENV = "TYPESAFE_BASE_URL";
 
 export class TypeSafeJevClient implements JevClient {
   readonly #client: TypeSafeClient;
@@ -223,14 +186,6 @@ export function toJevError(error: unknown): Error {
   return new JevRequestError(`Jev request failed: ${describeError(error)}`, { retryable: false, cause: error });
 }
 
-function requireIds(ids: readonly string[]): readonly string[] {
-  if (ids.length === 0) throw new JevInputError("a Jev request needs at least one question");
-  for (const id of ids) {
-    if (id.length === 0) throw new JevInputError("question ids must be non-empty strings");
-  }
-  return ids;
-}
-
 function validateChoiceSpec<L extends string>(id: string, spec: ChoiceQuestionSpec<L>): void {
   if (typeof spec.instructions !== "string" || spec.instructions.length === 0) {
     throw new JevInputError(`choice question "${id}" has no instructions`);
@@ -244,82 +199,3 @@ function validateChoiceSpec<L extends string>(id: string, spec: ChoiceQuestionSp
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isUnitInterval(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
-}
-
-function readModel(model: unknown): string {
-  return typeof model === "string" ? model : "";
-}
-
-function readUsage(usage: unknown): JevUsage {
-  const record = isRecord(usage) ? usage : {};
-  const input = record["input_tokens"];
-  const output = record["output_tokens"];
-  return {
-    inputTokens: typeof input === "number" && Number.isFinite(input) ? input : 0,
-    outputTokens: typeof output === "number" && Number.isFinite(output) ? output : 0,
-  };
-}
-
-function rejectUnexpectedIds(expected: readonly string[], answers: Record<string, unknown>): void {
-  const known = new Set(expected);
-  for (const key of Object.keys(answers)) {
-    if (!known.has(key)) throw new JevResponseError(`Jev answered an id that was not asked: "${key}"`);
-  }
-}
-
-export function validateNoulAnswers(ids: readonly string[], answers: unknown): Record<string, number> {
-  if (!isRecord(answers)) throw new JevResponseError("Jev response has no answers object");
-  rejectUnexpectedIds(ids, answers);
-  const out: Record<string, number> = {};
-  for (const id of ids) {
-    const answer = answers[id];
-    if (!isRecord(answer)) throw new JevResponseError(`Jev response is missing the answer for "${id}"`);
-    if (answer["type"] !== "noul") throw new JevResponseError(`Jev answer "${id}" is not a noul answer`);
-    const value = answer["noul"];
-    if (!isUnitInterval(value)) throw new JevResponseError(`Jev answer "${id}" has no noul value in [0, 1]`);
-    out[id] = value;
-  }
-  return out;
-}
-
-export function validateChoiceAnswers<L extends string>(
-  questions: Readonly<Record<string, ChoiceQuestionSpec<L>>>,
-  answers: unknown,
-): Record<string, ChoiceAnswer<L>> {
-  if (!isRecord(answers)) throw new JevResponseError("Jev response has no answers object");
-  const ids = Object.keys(questions);
-  rejectUnexpectedIds(ids, answers);
-  const out: Record<string, ChoiceAnswer<L>> = {};
-  for (const id of ids) {
-    const spec = questions[id];
-    if (spec === undefined) continue;
-    const answer = answers[id];
-    if (!isRecord(answer)) throw new JevResponseError(`Jev response is missing the answer for "${id}"`);
-    if (answer["type"] !== "choice") throw new JevResponseError(`Jev answer "${id}" is not a choice answer`);
-    const chosen = answer["choice"];
-    if (typeof chosen !== "string" || !spec.labels.includes(chosen as L)) {
-      throw new JevResponseError(`Jev answer "${id}" chose an undeclared label: ${String(chosen)}`);
-    }
-    const confidence = answer["confidence"];
-    if (!isUnitInterval(confidence)) throw new JevResponseError(`Jev answer "${id}" has no confidence in [0, 1]`);
-    const rawProbabilities = answer["probabilities"];
-    if (!isRecord(rawProbabilities)) throw new JevResponseError(`Jev answer "${id}" has no probabilities`);
-    const probabilities = {} as Record<L, number>;
-    for (const label of spec.labels) probabilities[label] = 0;
-    for (const [label, value] of Object.entries(rawProbabilities)) {
-      if (!spec.labels.includes(label as L)) {
-        throw new JevResponseError(`Jev answer "${id}" reports a probability for an undeclared label: ${label}`);
-      }
-      if (!isUnitInterval(value)) throw new JevResponseError(`Jev answer "${id}" has a probability outside [0, 1]`);
-      probabilities[label as L] = value;
-    }
-    out[id] = { choice: chosen as L, confidence, probabilities };
-  }
-  return out;
-}

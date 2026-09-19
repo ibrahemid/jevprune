@@ -2,12 +2,13 @@ import { readFile } from "node:fs/promises";
 
 import { countByteLines, isValidUtf8 } from "../bytes.js";
 import { loadConfig } from "../config.js";
-import { errorMessage } from "../errors.js";
+import { errorMessage } from "../core/errors.js";
 import { footerAfter, withFooter } from "../footer.js";
 import type { CliIo } from "../io.js";
 import { readStreamBytes } from "../io.js";
 import { pruneOutput, recordRun } from "../prune.js";
-import { NOT_UTF8_NOTE, passthroughSelection } from "../select.js";
+import { NOT_UTF8_NOTE } from "../core/reasons.js";
+import { passthroughSelection } from "../core/select.js";
 import { RunStore, newRunId } from "../store.js";
 import { resolveTask } from "../task.js";
 

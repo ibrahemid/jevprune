@@ -1,58 +1,26 @@
-import { randomBytes } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { appendFile, mkdir, open, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
-import { join } from "node:path";
 import { finished } from "node:stream/promises";
 import type { Writable } from "node:stream";
 
 import { byteLineStarts } from "./bytes.js";
 import { DEFAULT_CONFIG } from "./config.js";
 import type { RetentionConfig } from "./config.js";
-import { LineRangeError, RunNotFoundError, RunStoreError, errorCode, errorMessage } from "./errors.js";
-import type { SelectionMode } from "./types.js";
+import { LineRangeError, RunNotFoundError, RunStoreError, errorCode, errorMessage } from "./core/errors.js";
+import { gainFilePath, joinHomePath, runLogPath, runMetaPath } from "./core/paths.js";
+import { planRetention } from "./core/retention.js";
+import type { RetentionEntry } from "./core/retention.js";
+import { RUNS_DIR, RUN_ID_PATTERN } from "./core/store-types.js";
 
-export const RUN_ID_PATTERN = /^[a-z0-9]+-[a-f0-9]{4}$/;
-export const RUNS_DIR = "runs";
-export const GAIN_FILE = "gain.jsonl";
+import type { GainEntry, GainTotals, RunMeta } from "./core/store-types.js";
+
+export { newRunId } from "./core/run-id.js";
+export { GAIN_FILE, RUNS_DIR, RUN_ID_PATTERN } from "./core/store-types.js";
+export type { GainEntry, GainTotals, RunMeta } from "./core/store-types.js";
 
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
-
-export interface RunMeta {
-  readonly id: string;
-  readonly command: string;
-  readonly argv: readonly string[];
-  readonly startedAt: string;
-  readonly endedAt: string;
-  readonly exitCode: number | null;
-  readonly signal: string | null;
-  readonly bytes: number;
-  readonly lines: number;
-  readonly mode: SelectionMode;
-  readonly linesOut: number;
-  readonly fallbackReason?: string;
-  readonly task: string;
-}
-
-export interface GainEntry {
-  readonly ts: string;
-  readonly id: string;
-  readonly mode: SelectionMode;
-  readonly linesIn: number;
-  readonly linesOut: number;
-  readonly bytesIn: number;
-  readonly bytesOut: number;
-  readonly reason?: string;
-}
-
-export interface GainTotals {
-  readonly runs: number;
-  readonly linesIn: number;
-  readonly linesOut: number;
-  readonly bytesIn: number;
-  readonly bytesOut: number;
-}
 
 export interface RunRecord {
   readonly id: string;
@@ -67,10 +35,6 @@ export interface RunWriter {
   write(chunk: Buffer): boolean;
   onDrain(listener: () => void): void;
   close(): Promise<void>;
-}
-
-export function newRunId(): string {
-  return `${Date.now().toString(36)}-${randomBytes(2).toString("hex")}`;
 }
 
 class FileRunWriter implements RunWriter {
@@ -150,19 +114,19 @@ export class RunStore {
   }
 
   get runsDir(): string {
-    return join(this.home, RUNS_DIR);
+    return joinHomePath(this.home, RUNS_DIR);
   }
 
   get gainPath(): string {
-    return join(this.home, GAIN_FILE);
+    return gainFilePath(this.home);
   }
 
   logPath(id: string): string {
-    return join(this.runsDir, `${requireRunId(id)}.log`);
+    return runLogPath(this.home, requireRunId(id));
   }
 
   metaPath(id: string): string {
-    return join(this.runsDir, `${requireRunId(id)}.json`);
+    return runMetaPath(this.home, requireRunId(id));
   }
 
   async openRun(run: { id: string }): Promise<RunWriter> {
@@ -280,20 +244,11 @@ export class RunStore {
     const ids = [...new Set(names.filter((name) => name.endsWith(".log")).map((name) => name.slice(0, -4)))]
       .filter((id) => RUN_ID_PATTERN.test(id))
       .sort();
-    const sizes = new Map<string, number>();
-    let total = 0;
+    const entries: RetentionEntry[] = [];
     for (const id of ids) {
-      const bytes = (await this.#sizeOf(this.logPath(id))) + (await this.#sizeOf(this.metaPath(id)));
-      sizes.set(id, bytes);
-      total += bytes;
+      entries.push({ id, bytes: (await this.#sizeOf(this.logPath(id))) + (await this.#sizeOf(this.metaPath(id))) });
     }
-    let count = ids.length;
-    for (const id of ids) {
-      if (count <= this.#retention.maxRuns && total <= this.#retention.maxBytes) break;
-      await this.discardRun(id);
-      total -= sizes.get(id) ?? 0;
-      count -= 1;
-    }
+    for (const id of planRetention(entries, this.#retention)) await this.discardRun(id);
   }
 
   async discardRun(id: string): Promise<void> {

@@ -5,12 +5,11 @@ import { parseArgs } from "node:util";
 import type { ParseArgsOptionsConfig } from "node:util";
 
 import { runGain } from "./commands/gain.js";
-import { runHook } from "./commands/hook.js";
 import { runRun } from "./commands/run.js";
 import { runSelect } from "./commands/select.js";
 import { runShow } from "./commands/show.js";
 import { parseThreshold } from "./config.js";
-import { ConfigError, JevpruneError, SpawnError, UsageError, errorMessage } from "./errors.js";
+import { ConfigError, JevpruneError, SpawnError, UsageError, errorMessage } from "./core/errors.js";
 import { processIo } from "./io.js";
 import type { CliIo } from "./io.js";
 import { VERSION } from "./version.js";
@@ -18,7 +17,7 @@ import { VERSION } from "./version.js";
 const HELP = `usage: jevprune <command> [options]
 
 commands:
-  run [--task <text>] [--threshold <n>] [--hook] [--transcript <path>] -- <command> [args...]
+  run [--task <text>] [--threshold <n>] -- <command> [args...]
       runs the command, prints the kept lines and exits with the command's exit code
   select [--task <text>] [--threshold <n>] [--file <path>] [--command <text>]
       prunes a local file or stdin and reports only its own exit status
@@ -26,8 +25,6 @@ commands:
       prints a saved run, or one line range of it, exactly as it was captured
   gain
       totals the locally recorded runs and estimates the output tokens removed
-  hook
-      reads a plugin PreToolUse event on stdin and answers it
 
 options:
   --task <text>     the task the kept lines have to serve
@@ -69,16 +66,12 @@ async function dispatch(argv: readonly string[], io: CliIo): Promise<number> {
       const values = parse(args, {
         task: { type: "string" },
         threshold: { type: "string" },
-        hook: { type: "boolean" },
-        transcript: { type: "string" },
       });
       return await runRun(
         {
           argv: rest,
           task: values.task,
           threshold: values.threshold === undefined ? undefined : parseThreshold(values.threshold),
-          hook: values.hook,
-          transcript: values.transcript,
         },
         io,
       );
@@ -115,10 +108,6 @@ async function dispatch(argv: readonly string[], io: CliIo): Promise<number> {
     case "gain": {
       parse(args, {});
       return await runGain(io);
-    }
-    case "hook": {
-      parse(args, {});
-      return await runHook(io);
     }
     default:
       throw new UsageError(`unknown command "${command}"`);

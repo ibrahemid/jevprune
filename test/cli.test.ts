@@ -1,13 +1,11 @@
 import { readFile, readdir, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { runCli } from "../src/cli.js";
-import { joinLines, splitLines } from "../src/lines.js";
-import type { Line } from "../src/lines.js";
+import { joinLines, splitLines } from "../src/core/lines.js";
+import type { Line } from "../src/core/lines.js";
 import { RunStore } from "../src/store.js";
 import { VERSION } from "../src/version.js";
 import { homeEnv, makeHome, removeHome, testIo, writeConfig } from "./helpers/env.js";
@@ -129,6 +127,20 @@ describe("cli", () => {
     expect(unknownFlag.err()).toMatch(/^jevprune: /);
   });
 
+  it("no longer accepts the hook command or the run hook flags", async () => {
+    const hook = testIo(homeEnv(home));
+    expect(await runCli(["hook"], hook)).toBe(2);
+    expect(hook.err()).toBe('jevprune: unknown command "hook"\n');
+
+    const hookFlag = testIo(homeEnv(home));
+    expect(await runCli(["run", "--hook", "--", "true"], hookFlag)).toBe(2);
+    expect(hookFlag.err()).toMatch(/^jevprune: /);
+
+    const transcriptFlag = testIo(homeEnv(home));
+    expect(await runCli(["run", "--transcript", "x.jsonl", "--", "true"], transcriptFlag)).toBe(2);
+    expect(transcriptFlag.err()).toMatch(/^jevprune: /);
+  });
+
   it("rejects run without a command after --", async () => {
     const io = testIo(homeEnv(home));
     expect(await runCli(["run", "--task", "x"], io)).toBe(2);
@@ -235,57 +247,6 @@ describe("cli run", () => {
     );
   });
 
-  it("names a missing key once per home, and only in hook mode", async () => {
-    await writeConfig(home, { fastPathLines: 0 });
-    const script = "process.stdout.write('ok\\n');";
-
-    const plain = testIo(homeEnv(home));
-    expect(await runCli(["run", "--", ...node(script)], plain)).toBe(0);
-    expect(plain.err()).toBe("");
-
-    const first = testIo(homeEnv(home));
-    expect(await runCli(["run", "--hook", "--", ...node(script)], first)).toBe(0);
-    expect(first.err()).toBe("jevprune: TYPESAFE_API_KEY not set, using fallback\n");
-
-    const second = testIo(homeEnv(home));
-    expect(await runCli(["run", "--hook", "--", ...node(script)], second)).toBe(0);
-    expect(second.err()).toBe("");
-  });
-
-  it("names a rejected key every time in hook mode", async () => {
-    await writeConfig(home, { fastPathLines: 0, tailLines: 0, contextLines: 0, headLines: 1 });
-    const server = createServer((_request, response) => {
-      response.writeHead(401, { "content-type": "application/json" });
-      response.end(JSON.stringify({ error: { message: "invalid api key" } }));
-    });
-    await new Promise<void>((resolve) => {
-      server.listen(0, "127.0.0.1", resolve);
-    });
-    const port = (server.address() as AddressInfo).port;
-    const env = {
-      ...homeEnv(home),
-      TYPESAFE_API_KEY: "test-key",
-      TYPESAFE_BASE_URL: `http://127.0.0.1:${String(port)}`,
-    };
-    try {
-      const script = "for (let i = 1; i <= 5; i += 1) process.stdout.write('line ' + i + '\\n');";
-      for (const attempt of [1, 2]) {
-        const io = testIo(env);
-        expect(await runCli(["run", "--hook", "--", ...node(script)], io)).toBe(0);
-        expect(io.err(), `attempt ${String(attempt)}`).toBe(
-          "jevprune: TYPESAFE_API_KEY rejected (401), using fallback\n",
-        );
-        expect(io.out()).toContain("jevprune: fallback (Jev unavailable: unauthorized (401)), 5 → ");
-      }
-    } finally {
-      await new Promise<void>((resolve) => {
-        server.close(() => {
-          resolve();
-        });
-      });
-    }
-  });
-
   it("rejects a threshold outside [0, 1]", async () => {
     const io = testIo(homeEnv(home));
     expect(await runCli(["run", "--threshold", "2", "--", ...node("process.stdout.write('x\\n');")], io)).toBe(2);
@@ -381,18 +342,6 @@ describe("cli run", () => {
     const io = testIo(homeEnv(home));
     expect(await runCli(["run", "--", join(home, "missing-binary")], io)).toBe(127);
     expect(io.err()).toBe(`jevprune: command not found: ${join(home, "missing-binary")}\n`);
-  });
-
-  it("takes the task from the transcript only with --hook", async () => {
-    await writeConfig(home, { fastPathLines: 0 });
-    const transcript = join(home, "transcript.jsonl");
-    await writeFile(transcript, JSON.stringify({ type: "user", message: { content: "fix the auth test" } }), "utf8");
-    const io = testIo(homeEnv(home));
-    const argv = ["run", "--hook", "--transcript", transcript, "--", ...node("process.stdout.write('ok\\n');")];
-    expect(await runCli(argv, io)).toBe(0);
-    const [id] = await runIds();
-    const record = await new RunStore({ home }).readRun(String(id));
-    expect(record.meta?.task).toBe("fix the auth test");
   });
 
   it("falls back to the command as the task", async () => {

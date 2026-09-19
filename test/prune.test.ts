@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { FakeJevClient } from "../src/core/index.js";
 import type { NoulScorer } from "../src/core/index.js";
-import { splitLines } from "../src/lines.js";
+import { splitLines } from "../src/core/lines.js";
 import { pruneOutput, pruneStream } from "../src/prune.js";
 import { RunStore } from "../src/store.js";
 import { homeEnv, makeHome, removeHome } from "./helpers/env.js";

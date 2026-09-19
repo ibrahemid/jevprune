@@ -6,11 +6,11 @@ import { DEFAULT_CONFIG } from "../src/config.js";
 import type { ResolvedConfig } from "../src/config.js";
 import { FakeJevClient, estimateJsonTokens } from "../src/core/index.js";
 import type { NoulScorer } from "../src/core/index.js";
-import { computeKeeps } from "../src/keeps.js";
-import { joinLines, splitLines } from "../src/lines.js";
-import type { Line } from "../src/lines.js";
+import { computeKeeps } from "../src/core/keeps.js";
+import { joinLines, splitLines } from "../src/core/lines.js";
+import type { Line } from "../src/core/lines.js";
 import { pruneOutput } from "../src/prune.js";
-import { selectLines } from "../src/select.js";
+import { selectLines } from "../src/core/select.js";
 import { homeEnv, makeHome, removeHome } from "./helpers/env.js";
 
 const MARKER = /^\[jevprune: \d+ lines dropped, run [^,]+, lines \d+-\d+\]$/;

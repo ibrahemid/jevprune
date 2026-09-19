@@ -1,5 +1,5 @@
 import { loadConfig } from "../config.js";
-import { LineRangeError } from "../errors.js";
+import { LineRangeError } from "../core/errors.js";
 import type { CliIo } from "../io.js";
 import { RunStore } from "../store.js";
 

@@ -1,4 +1,4 @@
-import { errorCode } from "./errors.js";
+import { errorCode } from "./core/errors.js";
 
 export interface CliIo {
   readonly env: NodeJS.ProcessEnv;

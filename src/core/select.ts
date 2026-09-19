@@ -1,31 +1,22 @@
 import type { ResolvedConfig } from "./config.js";
-import {
-  JevRequestError,
-  JevResponseError,
-  JevTimeoutError,
-  estimateJsonTokens,
-  estimateTokens,
-  planWindows,
-  runWindows,
-} from "./core/index.js";
-import type { JevClient, JevState, NoulResult, WindowItem } from "./core/index.js";
+import type { JevClient, JevState, NoulResult } from "./client.js";
+import { JevRequestError, JevResponseError, JevTimeoutError } from "./jev-errors.js";
 import { computeKeeps } from "./keeps.js";
 import type { KeepReason } from "./keeps.js";
 import { splitLines } from "./lines.js";
 import { mergeDecisions } from "./merge.js";
 import type { Line } from "./lines.js";
+import { UNAUTHORIZED_REASON } from "./reasons.js";
+import { utf8Length } from "./text.js";
+import { estimateJsonTokens, estimateTokens } from "./tokens.js";
 import type { Decision, DroppedRange, FallbackReason, SelectionMode } from "./types.js";
+import { planWindows, runWindows } from "./windows.js";
+import type { WindowItem } from "./windows.js";
 
 export interface OversizeCapture {
   readonly lines: number;
   readonly headSegmentLines: number;
 }
-
-export const UNAUTHORIZED_REASON = "unauthorized (401)";
-
-export const NOT_UTF8_REASON = "not valid UTF-8";
-
-export const NOT_UTF8_NOTE = "output is not valid UTF-8";
 
 export const RUBRIC =
   "A line is needed when a developer acting on the task would want to read it: errors, failures, assertions, stack frames, diagnostics, timings or statuses that bear on the task, and the lines that give them meaning. Progress bars, download counters, repeated banners, unchanged status lines and routine success noise are not needed.";
@@ -120,7 +111,7 @@ export function questionFor(n: number): string {
 
 export async function selectLines(input: SelectInput): Promise<SelectionResult> {
   const lines = splitLines(input.text);
-  const bytesIn = Buffer.byteLength(input.text);
+  const bytesIn = utf8Length(input.text);
 
   if (input.oversize !== undefined) {
     return oversizeSelection(input, input.oversize, lines, bytesIn);
@@ -191,7 +182,7 @@ export async function selectLines(input: SelectInput): Promise<SelectionResult> 
     linesIn: lines.length,
     linesOut: splitLines(kept).length,
     bytesIn,
-    bytesOut: Buffer.byteLength(kept),
+    bytesOut: utf8Length(kept),
     windows: verdicts.windows,
     jevRequests: verdicts.jevRequests,
     jevInputTokens: verdicts.jevInputTokens,
@@ -330,24 +321,13 @@ function fallbackResult(fallback: FallbackMerge): SelectionResult {
     linesIn: fallback.linesIn,
     linesOut: splitLines(kept).length,
     bytesIn: fallback.bytesIn,
-    bytesOut: Buffer.byteLength(kept),
+    bytesOut: utf8Length(kept),
     windows: 0,
     jevRequests: 0,
     jevInputTokens: 0,
     fallbackReason: fallback.reason,
     decisions: fallback.decisions,
   };
-}
-
-export function fallbackReasonText(reason: FallbackReason): string {
-  switch (reason.kind) {
-    case "size-limit":
-      return `output over ${String(reason.maxBytes)} bytes`;
-    case "not-utf8":
-      return NOT_UTF8_REASON;
-    case "unavailable":
-      return reason.detail;
-  }
 }
 
 export function unavailableReason(error: unknown): FallbackReason {

@@ -1,63 +1,76 @@
-export class JevCoreError extends Error {
-  override readonly name: string = "JevCoreError";
+export class JevpruneError extends Error {
+  override readonly name: string = "JevpruneError";
 
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
   }
 }
 
-export class JevConfigError extends JevCoreError {
-  override readonly name = "JevConfigError";
+export class ConfigError extends JevpruneError {
+  override readonly name = "ConfigError";
 }
 
-export class JevInputError extends JevCoreError {
-  override readonly name = "JevInputError";
+export class UsageError extends JevpruneError {
+  override readonly name = "UsageError";
 }
 
-export class JevBudgetError extends JevCoreError {
-  override readonly name = "JevBudgetError";
-}
+export class RunStoreError extends JevpruneError {
+  override readonly name = "RunStoreError";
+  readonly code: string | undefined;
 
-export class JevRequestError extends JevCoreError {
-  override readonly name = "JevRequestError";
-  readonly status: number | undefined;
-  readonly retryable: boolean;
-  readonly requestId: string | undefined;
-
-  constructor(
-    message: string,
-    details: { status?: number; retryable: boolean; requestId?: string; cause?: unknown },
-  ) {
+  constructor(message: string, details: { code?: string; cause?: unknown } = {}) {
     super(message, { cause: details.cause });
-    this.status = details.status;
-    this.retryable = details.retryable;
-    this.requestId = details.requestId;
+    this.code = details.code;
   }
 }
 
-export class JevTimeoutError extends JevCoreError {
-  override readonly name = "JevTimeoutError";
-  readonly timeoutMs: number;
+export class SpawnError extends JevpruneError {
+  override readonly name = "SpawnError";
+  readonly executable: string;
+  readonly code: string | undefined;
 
-  constructor(timeoutMs: number, message?: string, options?: { cause?: unknown }) {
-    super(message ?? `Jev request exceeded ${String(timeoutMs)} ms`, options);
-    this.timeoutMs = timeoutMs;
+  constructor(message: string, details: { executable: string; code?: string; cause?: unknown }) {
+    super(message, { cause: details.cause });
+    this.executable = details.executable;
+    this.code = details.code;
   }
 }
 
-export class JevAbortError extends JevCoreError {
-  override readonly name = "JevAbortError";
+export class TranscriptError extends JevpruneError {
+  override readonly name = "TranscriptError";
+  readonly path: string;
 
-  constructor(message = "Jev request aborted", options?: { cause?: unknown }) {
-    super(message, options);
+  constructor(message: string, details: { path: string; cause?: unknown }) {
+    super(message, { cause: details.cause });
+    this.path = details.path;
   }
 }
 
-export class JevResponseError extends JevCoreError {
-  override readonly name = "JevResponseError";
+export class RunNotFoundError extends JevpruneError {
+  override readonly name = "RunNotFoundError";
+  readonly id: string;
+
+  constructor(id: string, options?: { cause?: unknown }) {
+    super(`run ${id} was not found`, options);
+    this.id = id;
+  }
 }
 
-export function describeError(error: unknown): string {
+export class LineRangeError extends JevpruneError {
+  override readonly name = "LineRangeError";
+}
+
+export function errorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const code: unknown = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code : undefined;
+}
+
+export function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : "Error";
+}
+
+export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;
   return String(error);

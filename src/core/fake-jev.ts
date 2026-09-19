@@ -1,4 +1,4 @@
-import { JevAbortError, JevInputError, JevTimeoutError } from "./errors.js";
+import { JevAbortError, JevInputError, JevTimeoutError } from "./jev-errors.js";
 import type {
   ChoiceAnswer,
   ChoiceQuestionSpec,
@@ -9,7 +9,7 @@ import type {
   JevState,
   NoulRequest,
   NoulResult,
-} from "./jev-client.js";
+} from "./client.js";
 import { estimateJsonTokens } from "./tokens.js";
 
 export type NoulScorer = (id: string, instructions: string, state: JevState) => number;

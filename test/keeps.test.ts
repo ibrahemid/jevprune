@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { SIGNATURE_CASE_INSENSITIVE, SIGNATURE_CASE_SENSITIVE, computeKeeps, isSignatureLine } from "../src/keeps.js";
-import { splitLines } from "../src/lines.js";
+import { SIGNATURE_CASE_INSENSITIVE, SIGNATURE_CASE_SENSITIVE, computeKeeps, isSignatureLine } from "../src/core/keeps.js";
+import { splitLines } from "../src/core/lines.js";
 
 const VITEST_OUTPUT = [
   "> app@0.1.0 test",

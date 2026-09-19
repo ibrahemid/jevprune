@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { joinLines, splitLines } from "../src/lines.js";
-import { collapseMarker, mergeDecisions } from "../src/merge.js";
-import type { Decision } from "../src/types.js";
+import { joinLines, splitLines } from "../src/core/lines.js";
+import { collapseMarker, mergeDecisions } from "../src/core/merge.js";
+import type { Decision } from "../src/core/types.js";
 
 const MARKER = /^\[jevprune: \d+ lines dropped, run [a-z0-9]+-[a-f0-9]{4}, lines \d+-\d+\]$/;
 

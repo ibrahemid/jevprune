@@ -1,7 +1,7 @@
 {
   "name": "jevprune",
   "version": "0.1.1",
-  "description": "Filter command output for coding agents using a task description.",
+  "description": "Prunes long Bash results per line before the model reads them, and recovers dropped ranges by run id.",
   "license": "MIT",
   "author": "ibrahemid",
   "repository": {
@@ -36,6 +36,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
+    "typecheck:hooks": "tsc -p tsconfig.hooks.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
     "gate": "scripts/gate.sh",

@@ -1,24 +1,21 @@
 import { loadConfig } from "../config.js";
-import { TYPESAFE_API_KEY_ENV } from "../core/index.js";
-import { RunStoreError, UsageError, errorName } from "../errors.js";
+import { RunStoreError, UsageError, errorName } from "../core/errors.js";
 import { footerAfter, withFooter } from "../footer.js";
 import type { CliIo } from "../io.js";
-import { shouldAnnounceMissingKey } from "../notices.js";
 import { clientFromEnv, recordRun } from "../prune.js";
 import type { RunMetaBase } from "../prune.js";
 import { runCommand } from "../runner.js";
 import type { RunCapture } from "../runner.js";
-import { NOT_UTF8_NOTE, UNAUTHORIZED_REASON, fallbackReasonText, passthroughSelection, selectLines } from "../select.js";
+import { NOT_UTF8_NOTE, fallbackReasonText } from "../core/reasons.js";
+import { passthroughSelection, selectLines } from "../core/select.js";
 import { RunStore, newRunId } from "../store.js";
 import { resolveTask } from "../task.js";
-import type { FallbackReason } from "../types.js";
+import type { FallbackReason } from "../core/types.js";
 
 export interface RunOptions {
   readonly argv: readonly string[];
   readonly task?: string | undefined;
   readonly threshold?: number | undefined;
-  readonly hook?: boolean | undefined;
-  readonly transcript?: string | undefined;
 }
 
 interface PassThroughInput {
@@ -35,18 +32,13 @@ export async function runRun(options: RunOptions, io: CliIo): Promise<number> {
   const store = new RunStore({ home: config.home, retention: config.retention });
   const runId = newRunId();
   const command = options.argv.join(" ");
-  const transcriptPath = options.hook === true ? options.transcript : undefined;
   const { task } = await resolveTask({
     ...(options.task !== undefined ? { flag: options.task } : {}),
     env: io.env,
-    ...(transcriptPath !== undefined ? { transcriptPath } : {}),
     command,
   });
 
   const client = clientFromEnv(io.env);
-  if (options.hook === true && client === null && (await shouldAnnounceMissingKey(config.home))) {
-    await io.writeError(`jevprune: ${TYPESAFE_API_KEY_ENV} not set, using fallback\n`).catch(() => undefined);
-  }
 
   const capture = await runCommand({
     argv: options.argv,
@@ -89,10 +81,6 @@ export async function runRun(options: RunOptions, io: CliIo): Promise<number> {
       config,
       runId,
     });
-    const reason = selection.fallbackReason;
-    if (options.hook === true && reason?.kind === "unavailable" && reason.detail === UNAUTHORIZED_REASON) {
-      await io.writeError(`jevprune: ${TYPESAFE_API_KEY_ENV} rejected (401), using fallback\n`).catch(() => undefined);
-    }
     const { footer } = await recordRun({
       store,
       selection,

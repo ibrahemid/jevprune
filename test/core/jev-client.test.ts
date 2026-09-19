@@ -6,11 +6,10 @@ import {
   JevRequestError,
   JevResponseError,
   JevTimeoutError,
-  TypeSafeJevClient,
-  createJevClientFromEnv,
   validateChoiceAnswers,
   validateNoulAnswers,
 } from "../../src/core/index.js";
+import { TypeSafeJevClient, createJevClientFromEnv } from "../../src/typesafe-client.js";
 
 interface Captured {
   url: string;
