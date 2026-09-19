@@ -17,6 +17,6 @@ run() {
 run typecheck pnpm exec tsc --noEmit
 run typecheck:hooks pnpm exec tsc -p tsconfig.hooks.json --noEmit
 run lint pnpm exec eslint . --max-warnings 0
-run test pnpm exec vitest run --reporter=dot
 run build pnpm exec tsup
+run test pnpm exec vitest run --reporter=dot
 exit $status

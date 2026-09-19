@@ -1,6 +1,6 @@
 {
   "name": "jevprune",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Prunes long Bash results per line before the model reads them, and recovers dropped ranges by run id.",
   "license": "MIT",
   "author": "ibrahemid",
