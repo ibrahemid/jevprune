@@ -77,9 +77,7 @@ describe("handleBashResult", () => {
     const footer = `jevprune: 200 → 43 lines, exit 0, full output ~/.jevprune/runs/${id}.log`;
 
     expect(outcome.result).toEqual({ stdout: `${kept}${footer}\n`, stderr: "", interrupted: false });
-    expect(engine.toastCalls).toEqual([
-      { text: `jevprune: 200 → 43 lines, run ${id}`, timeoutMs: 8000 },
-    ]);
+    expect(engine.toastCalls).toEqual([{ text: `200 → 43 lines, run ${id}`, timeoutMs: 8000 }]);
     expect(engine.files.get(`${HOME}/runs/${id}.log`)).toBe(text);
 
     const meta: unknown = JSON.parse(engine.files.get(`${HOME}/runs/${id}.json`) ?? "null");

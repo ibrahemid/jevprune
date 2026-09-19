@@ -308,10 +308,9 @@ async function pruneBashResult(
     const stdout = withFooter(kept, footer);
     if (stdout.length > maxChars) return passThrough(deps, options, answer, "budget");
 
-    deps.ui.toast(
-      `jevprune: ${formatCount(selection.linesIn)} → ${formatCount(linesOut)} lines, run ${runId}`,
-      { timeoutMs: TOAST_TIMEOUT_MS },
-    );
+    deps.ui.toast(`${formatCount(selection.linesIn)} → ${formatCount(linesOut)} lines, run ${runId}`, {
+      timeoutMs: TOAST_TIMEOUT_MS,
+    });
     logDiagnostic(
       deps,
       options,
