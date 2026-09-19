@@ -109,7 +109,7 @@ jevprune show m1xk2p7a-3f9c --lines 120-531
 
 ![jevprune demo](docs/demo.gif)
 
-The demo prunes one saved vitest log for two different tasks and reads a dropped range back. [Full demo output](https://github.com/ibrahemid/jevprune/blob/main/docs/demo-output.md).
+The recording installs the plugin, runs `npm test` inside a session, and shows the toast, the markers and the footer, then prints one dropped range back with `show`. `docs/demo.tape` re-records it with vhs. [CLI transcripts](https://github.com/ibrahemid/jevprune/blob/main/docs/demo-output.md) show `select` on one saved vitest log for two tasks.
 
 ## Commands
 
