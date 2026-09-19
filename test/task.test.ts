@@ -17,28 +17,29 @@ import type { TaskMessage } from "../src/index.js";
 import { resolveTask } from "../src/task.js";
 
 describe("resolveTask", () => {
-  it("prefers the flag over the environment and the command", async () => {
-    expect(
-      await resolveTask({ flag: "from flag", env: { JEVPRUNE_TASK: "from env" }, command: "pnpm test" }),
-    ).toEqual({ task: "from flag", source: "flag" });
+  it("prefers the flag over the environment and the command", () => {
+    expect(resolveTask({ flag: "from flag", env: { JEVPRUNE_TASK: "from env" }, command: "pnpm test" })).toEqual({
+      task: "from flag",
+      source: "flag",
+    });
   });
 
-  it("prefers the environment over the command", async () => {
-    expect(await resolveTask({ env: { JEVPRUNE_TASK: "from env" }, command: "pnpm test" })).toEqual({
+  it("prefers the environment over the command", () => {
+    expect(resolveTask({ env: { JEVPRUNE_TASK: "from env" }, command: "pnpm test" })).toEqual({
       task: "from env",
       source: "env",
     });
   });
 
-  it("falls back to the command", async () => {
-    expect(await resolveTask({ env: {}, command: "pnpm test" })).toEqual({
+  it("falls back to the command", () => {
+    expect(resolveTask({ env: {}, command: "pnpm test" })).toEqual({
       task: "pnpm test",
       source: "command",
     });
   });
 
-  it("ignores blank flag and environment values", async () => {
-    expect(await resolveTask({ flag: "   ", env: { JEVPRUNE_TASK: "" }, command: "pnpm test" })).toEqual({
+  it("ignores blank flag and environment values", () => {
+    expect(resolveTask({ flag: "   ", env: { JEVPRUNE_TASK: "" }, command: "pnpm test" })).toEqual({
       task: "pnpm test",
       source: "command",
     });

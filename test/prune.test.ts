@@ -1,4 +1,4 @@
-import { access, readdir } from "node:fs/promises";
+import { access, chmod, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 
@@ -7,8 +7,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FakeJevClient } from "../src/core/index.js";
 import type { NoulScorer } from "../src/core/index.js";
 import { splitLines } from "../src/core/lines.js";
-import { pruneOutput, pruneStream } from "../src/prune.js";
-import { RunStore } from "../src/store.js";
+import { pruneOutput, pruneStream, recordRun } from "../src/prune.js";
+import { passthroughSelection } from "../src/core/select.js";
+import { RunStore, newRunId } from "../src/store.js";
 import { homeEnv, makeHome, removeHome } from "./helpers/env.js";
 
 interface WindowState {
@@ -153,6 +154,89 @@ describe("pruneOutput", () => {
     expect((await new RunStore({ home }).readRun(result.runId)).text).toBe(text);
   });
 
+  it("deletes a streamed secret log even when the run store already failed", async () => {
+    const store = new RunStore({ home });
+    const id = newRunId();
+    const text = "-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKj34GkxFhD9\n-----END RSA PRIVATE KEY-----\n";
+    const writer = await store.openRun({ id });
+    writer.write(Buffer.from(text, "utf8"));
+    await writer.close();
+    expect(await exists(store.logPath(id))).toBe(true);
+
+    const { footer, logPath } = await recordRun({
+      store,
+      archive: false,
+      storeFailureCode: "EACCES",
+      selection: passthroughSelection({
+        bytes: Buffer.byteLength(text, "utf8"),
+        lines: splitLines(text).length,
+        text,
+        reason: { kind: "secret" },
+      }),
+      meta: {
+        id,
+        command: "cat id_rsa",
+        argv: [],
+        startedAt: new Date().toISOString(),
+        endedAt: new Date().toISOString(),
+        exitCode: 0,
+        signal: null,
+        bytes: Buffer.byteLength(text, "utf8"),
+        lines: splitLines(text).length,
+        task: "read the key",
+      },
+    });
+
+    expect(await readdir(join(home, "runs"))).toEqual([]);
+    expect(logPath).toBeUndefined();
+    expect(footer).toBe(
+      "jevprune: exit 0, 3 lines passed through (output looks like a credential, full output was not saved)",
+    );
+  });
+
+  it("names the code and the path when the secret log could not be removed", async () => {
+    const store = new RunStore({ home });
+    const id = newRunId();
+    const text = "-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKj34GkxFhD9\n-----END RSA PRIVATE KEY-----\n";
+    const writer = await store.openRun({ id });
+    writer.write(Buffer.from(text, "utf8"));
+    await writer.close();
+    await chmod(join(home, "runs"), 0o500);
+
+    try {
+      const { footer, logPath } = await recordRun({
+        store,
+        archive: false,
+        selection: passthroughSelection({
+          bytes: Buffer.byteLength(text, "utf8"),
+          lines: splitLines(text).length,
+          text,
+          reason: { kind: "secret" },
+        }),
+        meta: {
+          id,
+          command: "cat id_rsa",
+          argv: [],
+          startedAt: new Date().toISOString(),
+          endedAt: new Date().toISOString(),
+          exitCode: 0,
+          signal: null,
+          bytes: Buffer.byteLength(text, "utf8"),
+          lines: splitLines(text).length,
+          task: "read the key",
+        },
+      });
+
+      expect(footer).toBe(
+        `jevprune: exit 0, 3 lines passed through (output looks like a credential, saved log could not be removed (EACCES): ${store.logPath(id)})`,
+      );
+      expect(logPath).toBe(store.logPath(id));
+      expect(await exists(store.logPath(id))).toBe(true);
+    } finally {
+      await chmod(join(home, "runs"), 0o700);
+    }
+  });
+
   it("saves nothing but a ledger entry on the fast path", async () => {
     const result = await pruneOutput({
       text: "one\ntwo\n",
@@ -203,6 +287,31 @@ describe("pruneOutput", () => {
     expect((await new RunStore({ home }).readRun(result.runId)).text).toBe(text);
   });
 
+  it("saves no log when an oversize capture looks like a credential", async () => {
+    const text = `${buildLog()}AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY\n`;
+    const client = new FakeJevClient({ noul: keepMarked() });
+    const result = await pruneOutput({
+      text,
+      task: "find the session problem",
+      command: "pnpm build",
+      exitCode: 0,
+      client,
+      env: homeEnv(home),
+      config: { maxPruneBytes: 1024, headLines: 5, tailLines: 4, contextLines: 0 },
+    });
+
+    expect(client.calls).toEqual([]);
+    expect(result.mode).toBe("fallback");
+    expect(result.fallbackReason).toEqual({ kind: "size-limit", maxBytes: 1024, isSecret: true });
+    expect(result.footer).toContain(
+      "fallback (output over 1024 bytes, output looked like a credential, full output was not saved)",
+    );
+    expect(result.footer).not.toContain(join(home, "runs"));
+    expect(result.logPath).toBeUndefined();
+    expect(await exists(join(home, "runs", `${result.runId}.log`))).toBe(false);
+    expect(await readdir(join(home, "runs")).catch(() => [])).toEqual([]);
+  });
+
   it("applies the size limit before the failed command passthrough", async () => {
     const client = new FakeJevClient({ noul: keepMarked() });
     const result = await pruneOutput({
@@ -236,6 +345,92 @@ describe("pruneOutput", () => {
       config: { threshold: 0.4, tailLines: 0, contextLines: 0 },
     });
     expect(kept.linesOut).toBeGreaterThan(dropped.linesOut);
+  });
+});
+
+describe("pruneOutput protection", () => {
+  function jsonDocument(): string {
+    const entries = Array.from({ length: 80 }, (_, index) => `  "package-${String(index + 1)}": "1.0.${String(index)}"`);
+    return `{\n${entries.join(",\n")}\n}\n`;
+  }
+
+  it("passes a document through by default", async () => {
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const text = jsonDocument();
+    const result = await pruneOutput({
+      text,
+      task: "read the manifest",
+      command: "jq . package.json",
+      exitCode: 0,
+      client,
+      env: homeEnv(home),
+    });
+
+    expect(result.mode).toBe("passthrough");
+    expect(result.fallbackReason).toEqual({ kind: "document" });
+    expect(result.kept).toBe(text);
+    expect(result.footer).toContain("lines passed through (output looks like a document)");
+    expect(client.calls).toEqual([]);
+  });
+
+  it("saves no log for a credential read through a reader command", async () => {
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const text = "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----\n";
+    const result = await pruneOutput({
+      text,
+      task: "read the key",
+      command: "cat /home/dev/.ssh/id_rsa",
+      exitCode: 0,
+      client,
+      env: homeEnv(home),
+      config: { fastPathLines: 0 },
+    });
+
+    expect(client.calls).toEqual([]);
+    expect(result.mode).toBe("passthrough");
+    expect(result.fallbackReason).toEqual({ kind: "secret" });
+    expect(result.kept).toBe(text);
+    expect(result.logPath).toBeUndefined();
+    expect(await readdir(join(home, "runs")).catch(() => [])).toEqual([]);
+  });
+
+  it("saves no log when a failed command prints a credential", async () => {
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const text = `${buildLog()}ACCESS_TOKEN=4f9a2c7e51d8\n`;
+    const result = await pruneOutput({
+      text,
+      task: "find the deploy problem",
+      command: "./deploy.sh",
+      exitCode: 1,
+      client,
+      env: homeEnv(home),
+    });
+
+    expect(client.calls).toEqual([]);
+    expect(result.mode).toBe("passthrough");
+    expect(result.fallbackReason).toEqual({ kind: "secret" });
+    expect(result.kept).toBe(text);
+    expect(result.footer).toBe(
+      `jevprune: exit 1, ${String(result.linesIn)} lines passed through (output looks like a credential, full output was not saved)`,
+    );
+    expect(result.logPath).toBeUndefined();
+    expect(await readdir(join(home, "runs")).catch(() => [])).toEqual([]);
+  });
+
+  it("prunes the same document when protection is off", async () => {
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const result = await pruneOutput({
+      text: jsonDocument(),
+      task: "read the manifest",
+      command: "jq . package.json",
+      exitCode: 0,
+      client,
+      protect: false,
+      env: homeEnv(home),
+    });
+
+    expect(result.mode).toBe("jev");
+    expect(client.calls.length).toBeGreaterThan(0);
   });
 });
 
@@ -296,6 +491,27 @@ describe("pruneStream", () => {
     ).rejects.toBe(failure);
 
     expect(await readdir(join(home, "runs"))).toEqual([]);
+  });
+
+  it("deletes the streamed log when a failed command prints a credential", async () => {
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const text = `${buildLog()}ACCESS_TOKEN=4f9a2c7e51d8\n`;
+    const result = await pruneStream({
+      stream: Readable.from([Buffer.from(text, "utf8")]),
+      task: "find the deploy problem",
+      command: "./deploy.sh",
+      exitCode: 1,
+      client,
+      env: homeEnv(home),
+    });
+
+    expect(client.calls).toEqual([]);
+    expect(result.mode).toBe("passthrough");
+    expect(result.fallbackReason).toEqual({ kind: "secret" });
+    expect(result.logPath).toBeUndefined();
+    expect(await exists(join(home, "runs", `${result.runId}.log`))).toBe(false);
+    expect(await readdir(join(home, "runs")).catch(() => [])).toEqual([]);
+    expect(await new RunStore({ home }).readGain()).toMatchObject({ runs: 1 });
   });
 
   it("saves nothing but a ledger entry on the fast path", async () => {

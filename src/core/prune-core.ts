@@ -15,6 +15,7 @@ export interface PruneCoreInput {
   readonly config: ResolvedConfig;
   readonly runId: string;
   readonly bytes: number;
+  readonly protect?: boolean;
   readonly oversize?: OversizeCapture;
   readonly signal?: AbortSignal;
   readonly now: () => string;
@@ -39,6 +40,7 @@ export async function pruneCore(input: PruneCoreInput): Promise<PruneCoreResult>
     client: input.client,
     config: input.config,
     runId: input.runId,
+    ...(input.protect === undefined ? {} : { protect: input.protect }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   const plan = buildRunRecord({

@@ -15,8 +15,10 @@ export type DecisionReason =
 
 export type FallbackReason =
   | { readonly kind: "unavailable"; readonly detail: string }
-  | { readonly kind: "size-limit"; readonly maxBytes: number }
-  | { readonly kind: "not-utf8" };
+  | { readonly kind: "size-limit"; readonly maxBytes: number; readonly isSecret?: boolean }
+  | { readonly kind: "not-utf8" }
+  | { readonly kind: "document" }
+  | { readonly kind: "secret" };
 
 export interface Decision {
   keep: boolean;

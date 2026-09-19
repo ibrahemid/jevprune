@@ -6,7 +6,7 @@ export { pruneOutput, pruneStream } from "./prune.js";
 export type { PruneInput, PruneResult, PruneStreamInput } from "./prune.js";
 export { RunStore } from "./store.js";
 export type { RunRecord, RunWriter } from "./store.js";
-export { MAX_TASK_LENGTH, resolveTask } from "./task.js";
+export { resolveTask } from "./task.js";
 export type { ResolvedTask, TaskInput, TaskSource } from "./task.js";
 export { TypeSafeJevClient, createJevClientFromEnv, toJevError } from "./typesafe-client.js";
 export type { TypeSafeJevClientConfig } from "./typesafe-client.js";

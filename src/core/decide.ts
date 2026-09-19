@@ -43,9 +43,9 @@ export function passthroughReason(input: PassthroughDecisionInput): PassthroughR
   if (input.interrupted) return "interrupted";
   if (isRecoveryRead(input.command, input.home)) return "recovery-read";
   if (input.lines <= input.fastPathLines) return "fast-path";
+  if (looksSecret(input.command, input.output)) return "secret";
   if (looksBinary(input.output)) return "binary";
   if (isDocumentOutput(input.command, input.output)) return "document";
-  if (looksSecret(input.command, input.output)) return "secret";
   if (!input.hasKey) return "no-key";
   return null;
 }

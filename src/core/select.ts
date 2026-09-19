@@ -1,3 +1,4 @@
+import { isDocumentOutput } from "./classify.js";
 import type { ResolvedConfig } from "./config.js";
 import type { JevClient, JevState, NoulResult } from "./client.js";
 import { JevRequestError, JevResponseError, JevTimeoutError } from "./jev-errors.js";
@@ -7,7 +8,8 @@ import { splitLines } from "./lines.js";
 import { mergeDecisions } from "./merge.js";
 import type { Line } from "./lines.js";
 import { UNAUTHORIZED_REASON } from "./reasons.js";
-import { utf8Length } from "./text.js";
+import { looksSecret } from "./secrets.js";
+import { looksBinary, utf8Length } from "./text.js";
 import { estimateJsonTokens, estimateTokens } from "./tokens.js";
 import type { Decision, DroppedRange, FallbackReason, SelectionMode } from "./types.js";
 import { planWindows, runWindows } from "./windows.js";
@@ -34,11 +36,13 @@ export interface SelectInput {
   readonly config: ResolvedConfig;
   readonly runId: string;
   readonly signal?: AbortSignal;
+  readonly protect?: boolean;
 }
 
 export interface PassthroughInput {
   readonly bytes: number;
   readonly lines: number;
+  readonly text?: string;
   readonly reason?: FallbackReason;
 }
 
@@ -91,7 +95,7 @@ interface JevVerdicts {
 export function passthroughSelection(input: PassthroughInput): SelectionResult {
   return {
     mode: "passthrough",
-    kept: "",
+    kept: input.text ?? "",
     dropped: [],
     linesIn: input.lines,
     linesOut: input.lines,
@@ -105,6 +109,18 @@ export function passthroughSelection(input: PassthroughInput): SelectionResult {
   };
 }
 
+function holdsSecret(input: SelectInput): boolean {
+  return input.protect !== false && looksSecret(input.command, input.text);
+}
+
+function protectedReason(input: SelectInput): FallbackReason | undefined {
+  if (holdsSecret(input)) return { kind: "secret" };
+  if (input.protect === false) return undefined;
+  if (looksBinary(input.text)) return { kind: "not-utf8" };
+  if (isDocumentOutput(input.command, input.text)) return { kind: "document" };
+  return undefined;
+}
+
 export function questionFor(n: number): string {
   return `Is line ${String(n)} needed for the task?`;
 }
@@ -114,10 +130,16 @@ export async function selectLines(input: SelectInput): Promise<SelectionResult> 
   const bytesIn = utf8Length(input.text);
 
   if (input.oversize !== undefined) {
-    return oversizeSelection(input, input.oversize, lines, bytesIn);
+    const isSecret = protectedReason(input)?.kind === "secret";
+    return oversizeSelection(input, input.oversize, lines, bytesIn, isSecret);
   }
   if ((input.exitCode !== undefined && input.exitCode !== null && input.exitCode !== 0) || input.interrupted === true) {
-    return everyLine(lines, "passthrough", input.text, bytesIn);
+    const secret: FallbackReason | undefined = holdsSecret(input) ? { kind: "secret" } : undefined;
+    return everyLine(lines, "passthrough", input.text, bytesIn, secret);
+  }
+  const protection = protectedReason(input);
+  if (protection !== undefined) {
+    return passthroughSelection({ bytes: bytesIn, lines: lines.length, text: input.text, reason: protection });
   }
   if (lines.length <= input.config.fastPathLines) {
     return everyLine(lines, "fast-path", input.text, bytesIn);
@@ -264,6 +286,7 @@ function oversizeSelection(
   oversize: OversizeCapture,
   captured: readonly Line[],
   bytesIn: number,
+  isSecret: boolean,
 ): SelectionResult {
   const headCount = Math.min(Math.max(0, Math.trunc(oversize.headSegmentLines)), captured.length);
   const totalLines = Math.max(Math.trunc(oversize.lines), captured.length);
@@ -281,7 +304,7 @@ function oversizeSelection(
     lines,
     decisions: fallbackDecisions(lines, keeps, input.config.headLines),
     input,
-    reason: { kind: "size-limit", maxBytes: input.config.maxPruneBytes },
+    reason: { kind: "size-limit", maxBytes: input.config.maxPruneBytes, ...(isSecret ? { isSecret } : {}) },
     bytesIn,
     linesIn: totalLines,
     totalLines,
@@ -362,6 +385,7 @@ function everyLine(
   mode: "fast-path" | "passthrough",
   text: string,
   bytesIn: number,
+  reason?: FallbackReason,
 ): SelectionResult {
   const decisions = new Map<number, Decision>();
   for (const line of lines) decisions.set(line.n, { keep: true, reason: mode });
@@ -376,6 +400,7 @@ function everyLine(
     windows: 0,
     jevRequests: 0,
     jevInputTokens: 0,
+    ...(reason === undefined ? {} : { fallbackReason: reason }),
     decisions,
   };
 }

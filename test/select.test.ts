@@ -294,3 +294,221 @@ describe("selectLines", () => {
     expect(failed.kept).toBe(result.kept);
   });
 });
+
+describe("selectLines protection", () => {
+  function stepLines(count: number): string {
+    return `${Array.from({ length: count }, (_, index) => `step ${String(index + 1)}`).join("\n")}\n`;
+  }
+
+  function jsonDocument(): string {
+    const entries = Array.from({ length: 80 }, (_, index) => `  "package-${String(index + 1)}": "1.0.${String(index)}"`);
+    return `{\n${entries.join(",\n")}\n}\n`;
+  }
+
+  async function select(overrides: {
+    readonly text: string;
+    readonly command: string;
+    readonly client: FakeJevClient;
+    readonly protect?: boolean;
+  }) {
+    return await selectLines({
+      text: overrides.text,
+      task: "read the output",
+      command: overrides.command,
+      exitCode: 0,
+      client: overrides.client,
+      config: config(),
+      runId: "abcd-0100",
+      ...(overrides.protect === undefined ? {} : { protect: overrides.protect }),
+    });
+  }
+
+  it("passes a jq document through without asking Jev", async () => {
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const text = jsonDocument();
+    const result = await select({ text, command: "jq . package.json", client });
+
+    expect(result.mode).toBe("passthrough");
+    expect(result.fallbackReason).toEqual({ kind: "document" });
+    expect(result.kept).toBe(text);
+    expect(result.linesOut).toBe(result.linesIn);
+    expect(client.calls).toEqual([]);
+  });
+
+  it("passes a diff read through without asking Jev", async () => {
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const text = stepLines(200);
+    const result = await select({ text, command: "git diff", client });
+
+    expect(result.mode).toBe("passthrough");
+    expect(result.fallbackReason).toEqual({ kind: "document" });
+    expect(result.kept).toBe(text);
+    expect(client.calls).toEqual([]);
+  });
+
+  it("passes credential output through without asking Jev", async () => {
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const text = stepLines(200);
+    const result = await select({ text, command: "printenv", client });
+
+    expect(result.mode).toBe("passthrough");
+    expect(result.fallbackReason).toEqual({ kind: "secret" });
+    expect(result.kept).toBe(text);
+    expect(client.calls).toEqual([]);
+  });
+
+  it("names the credential guard ahead of a reader command", async () => {
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const text = `-----BEGIN RSA PRIVATE KEY-----\n${stepLines(200)}-----END RSA PRIVATE KEY-----\n`;
+    const result = await select({ text, command: "cat /home/dev/.ssh/id_rsa", client });
+
+    expect(result.mode).toBe("passthrough");
+    expect(result.fallbackReason).toEqual({ kind: "secret" });
+    expect(result.kept).toBe(text);
+    expect(client.calls).toEqual([]);
+  });
+
+  it("names the credential guard for a credential read through jq", async () => {
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const text = `{\n  "token": "x"\n}\n${stepLines(200)}api_key: 4f9a2c7e51\n`;
+    const result = await select({ text, command: "jq . config.json", client });
+
+    expect(result.mode).toBe("passthrough");
+    expect(result.fallbackReason).toEqual({ kind: "secret" });
+    expect(client.calls).toEqual([]);
+  });
+
+  it("marks an oversize credential read through a reader command", async () => {
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const settings = config();
+    const result = await selectLines({
+      text: `-----BEGIN RSA PRIVATE KEY-----\n${stepLines(200)}`,
+      task: "read the output",
+      command: "cat /home/dev/big-secret.txt",
+      exitCode: 0,
+      oversize: { lines: 51_234, headSegmentLines: 100 },
+      client,
+      config: settings,
+      runId: "abcd-0104",
+    });
+
+    expect(result.mode).toBe("fallback");
+    expect(result.fallbackReason).toEqual({ kind: "size-limit", maxBytes: settings.maxPruneBytes, isSecret: true });
+    expect(client.calls).toEqual([]);
+  });
+
+  it("names the credential guard when the command failed", async () => {
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const text = `${stepLines(200)}ACCESS_TOKEN=4f9a2c7e51d8\n`;
+    const result = await selectLines({
+      text,
+      task: "read the output",
+      command: "./deploy.sh",
+      exitCode: 1,
+      client,
+      config: config(),
+      runId: "abcd-0105",
+    });
+
+    expect(result.mode).toBe("passthrough");
+    expect(result.fallbackReason).toEqual({ kind: "secret" });
+    expect(result.kept).toBe(text);
+    expect(result.linesOut).toBe(result.linesIn);
+    expect(client.calls).toEqual([]);
+  });
+
+  it("leaves a failed command without a credential unmarked", async () => {
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const result = await selectLines({
+      text: stepLines(200),
+      task: "read the output",
+      command: "./deploy.sh",
+      exitCode: 1,
+      client,
+      config: config(),
+      runId: "abcd-0106",
+    });
+
+    expect(result.mode).toBe("passthrough");
+    expect(result.fallbackReason).toBeUndefined();
+    expect(client.calls).toEqual([]);
+  });
+
+  it("passes binary output through without asking Jev", async () => {
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const text = `${Array.from({ length: 200 }, (_, index) => `step ${String(index + 1)}\u0000\u0001\u0002`).join("\n")}\n`;
+    const result = await select({ text, command: "pnpm build", client });
+
+    expect(result.mode).toBe("passthrough");
+    expect(result.fallbackReason).toEqual({ kind: "not-utf8" });
+    expect(result.kept).toBe(text);
+    expect(client.calls).toEqual([]);
+  });
+
+  it("prunes a document when protection is off", async () => {
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const result = await select({ text: jsonDocument(), command: "jq . package.json", client, protect: false });
+
+    expect(result.mode).toBe("jev");
+    expect(client.calls.length).toBeGreaterThan(0);
+  });
+
+  it("marks an oversize capture that looks like a credential without asking Jev", async () => {
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const settings = config();
+    const text = `${stepLines(200)}AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY\n`;
+    const result = await selectLines({
+      text,
+      task: "read the output",
+      command: "pnpm build",
+      exitCode: 0,
+      oversize: { lines: 51_234, headSegmentLines: 100 },
+      client,
+      config: settings,
+      runId: "abcd-0102",
+    });
+
+    expect(result.mode).toBe("fallback");
+    expect(result.fallbackReason).toEqual({ kind: "size-limit", maxBytes: settings.maxPruneBytes, isSecret: true });
+    expect(result.linesIn).toBe(51_234);
+    expect(result.kept).toContain("lines dropped, run abcd-0102");
+    expect(client.calls).toEqual([]);
+  });
+
+  it("leaves an oversize capture that holds no credential unmarked", async () => {
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const settings = config();
+    const result = await selectLines({
+      text: stepLines(200),
+      task: "read the output",
+      command: "pnpm build",
+      exitCode: 0,
+      oversize: { lines: 51_234, headSegmentLines: 100 },
+      client,
+      config: settings,
+      runId: "abcd-0103",
+    });
+
+    expect(result.mode).toBe("fallback");
+    expect(result.fallbackReason).toEqual({ kind: "size-limit", maxBytes: settings.maxPruneBytes });
+    expect(client.calls).toEqual([]);
+  });
+
+  it("keeps passing a failed command through before it looks at the content", async () => {
+    const client = new FakeJevClient({ noul: () => 0.9 });
+    const text = stepLines(200);
+    const result = await selectLines({
+      text,
+      task: "read the output",
+      command: "jq . package.json",
+      exitCode: 2,
+      client,
+      config: config(),
+      runId: "abcd-0101",
+    });
+
+    expect(result.mode).toBe("passthrough");
+    expect(result.fallbackReason).toBeUndefined();
+    expect(result.kept).toBe(text);
+  });
+});

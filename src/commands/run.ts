@@ -2,12 +2,13 @@ import { loadConfig } from "../config.js";
 import { RunStoreError, UsageError, errorName } from "../core/errors.js";
 import { footerAfter, withFooter } from "../footer.js";
 import type { CliIo } from "../io.js";
-import { clientFromEnv, recordRun } from "../prune.js";
+import { clientFromEnv, recordRun, shouldArchiveSelection } from "../prune.js";
 import type { RunMetaBase } from "../prune.js";
 import { runCommand } from "../runner.js";
 import type { RunCapture } from "../runner.js";
 import { NOT_UTF8_NOTE, fallbackReasonText } from "../core/reasons.js";
 import { passthroughSelection, selectLines } from "../core/select.js";
+import { looksSecret } from "../core/secrets.js";
 import { RunStore, newRunId } from "../store.js";
 import { resolveTask } from "../task.js";
 import type { FallbackReason } from "../core/types.js";
@@ -32,7 +33,7 @@ export async function runRun(options: RunOptions, io: CliIo): Promise<number> {
   const store = new RunStore({ home: config.home, retention: config.retention });
   const runId = newRunId();
   const command = options.argv.join(" ");
-  const { task } = await resolveTask({
+  const { task } = resolveTask({
     ...(options.task !== undefined ? { flag: options.task } : {}),
     env: io.env,
     command,
@@ -85,6 +86,7 @@ export async function runRun(options: RunOptions, io: CliIo): Promise<number> {
       store,
       selection,
       meta,
+      archive: shouldArchiveSelection(selection),
       ...(capture.storeFailure !== undefined
         ? { storeFailureCode: capture.storeFailure.code ?? "failed" }
         : {}),
@@ -126,22 +128,29 @@ async function passThrough(input: PassThroughInput, io: CliIo): Promise<number> 
     complete = !capture.oversize;
   }
 
-  const oversizeReason: FallbackReason = { kind: "size-limit", maxBytes: input.maxPruneBytes };
+  const isSecret = capture.validUtf8 && looksSecret(input.meta.command, capture.captured.toString("utf8"));
+  const oversizeReason: FallbackReason = {
+    kind: "size-limit",
+    maxBytes: input.maxPruneBytes,
+    ...(isSecret ? { isSecret: true } : {}),
+  };
   const reason: FallbackReason | undefined = capture.validUtf8
-    ? complete
+    ? complete && !isSecret
       ? undefined
       : oversizeReason
     : { kind: "not-utf8" };
   const note = capture.validUtf8 ? (reason === undefined ? undefined : fallbackReasonText(reason)) : NOT_UTF8_NOTE;
 
   try {
+    const selection = passthroughSelection({
+      bytes: capture.bytes,
+      lines: capture.lines,
+      ...(reason !== undefined ? { reason } : {}),
+    });
     const { footer } = await recordRun({
       store: input.store,
-      selection: passthroughSelection({
-        bytes: capture.bytes,
-        lines: capture.lines,
-        ...(reason !== undefined ? { reason } : {}),
-      }),
+      selection,
+      archive: shouldArchiveSelection(selection),
       ...(note !== undefined ? { passthroughNote: note } : {}),
       meta: input.meta,
       ...(storeFailureCode !== undefined ? { storeFailureCode } : {}),

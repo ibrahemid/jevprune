@@ -90,8 +90,12 @@ describe("passthroughReason", () => {
     expect(decide({ output: "api_key: sk-live-3f9c2a\n", hasKey: false })).toBe("secret");
   });
 
-  it("reports a document ahead of a secret", () => {
-    expect(decide({ command: "cat .env", output: "api_key: sk-live-3f9c2a\n" })).toBe("document");
+  it("reports a secret ahead of a document and binary output", () => {
+    expect(decide({ command: "cat .env", output: "api_key: sk-live-3f9c2a\n" })).toBe("secret");
+    expect(decide({ command: "cat /home/dev/.ssh/id_rsa", output: "-----BEGIN RSA PRIVATE KEY-----\n" })).toBe(
+      "secret",
+    );
+    expect(decide({ command: "printenv", output: "header\u0000\u0001\u0002payload" })).toBe("secret");
   });
 
   it("reports the fast path ahead of a document", () => {

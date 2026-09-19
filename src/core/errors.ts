@@ -36,16 +36,6 @@ export class SpawnError extends JevpruneError {
   }
 }
 
-export class TranscriptError extends JevpruneError {
-  override readonly name = "TranscriptError";
-  readonly path: string;
-
-  constructor(message: string, details: { path: string; cause?: unknown }) {
-    super(message, { cause: details.cause });
-    this.path = details.path;
-  }
-}
-
 export class RunNotFoundError extends JevpruneError {
   override readonly name = "RunNotFoundError";
   readonly id: string;

@@ -7,6 +7,7 @@ import { runCli } from "../src/cli.js";
 import { joinLines, splitLines } from "../src/core/lines.js";
 import type { Line } from "../src/core/lines.js";
 import { RunStore } from "../src/store.js";
+import type { GainEntry } from "../src/store.js";
 import { VERSION } from "../src/version.js";
 import { homeEnv, makeHome, removeHome, testIo, writeConfig } from "./helpers/env.js";
 
@@ -28,6 +29,30 @@ async function runIds(): Promise<string[]> {
   const names = await readdir(join(home, "runs"));
   return names.filter((name) => name.endsWith(".log")).map((name) => name.slice(0, -4));
 }
+
+async function runFiles(): Promise<string[]> {
+  try {
+    return (await readdir(join(home, "runs"))).sort();
+  } catch (error) {
+    if ((error as { code?: string }).code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+async function gainLines(): Promise<GainEntry[]> {
+  const text = await readFile(join(home, "gain.jsonl"), "utf8");
+  return text
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as GainEntry);
+}
+
+const PRIVATE_KEY = [
+  "-----BEGIN RSA PRIVATE KEY-----",
+  "MIIBOgIBAAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf9Cnzj4p4WGeKLs1Pt8Qu",
+  "KUpRKfFLfRYC9AIKjbJTWit+CqvjWYzvQwECAwEAAQ==",
+  "-----END RSA PRIVATE KEY-----",
+].join("\n");
 
 const COLLAPSE_MARKER = /^\[jevprune: (\d+) lines dropped, run [a-z0-9]+-[a-f0-9]{4}, lines (\d+)-(\d+)\]$/;
 
@@ -324,6 +349,32 @@ describe("cli run", () => {
     expect(record.meta?.mode).toBe("passthrough");
   });
 
+  it("never archives an oversize failed run whose output holds a credential", async () => {
+    await writeConfig(home, { fastPathLines: 0, maxPruneBytes: 1024, headLines: 2, tailLines: 2 });
+    const io = testIo(homeEnv(home));
+    const script =
+      `process.stdout.write(${JSON.stringify(`${PRIVATE_KEY}\n`)});` +
+      " for (let i = 1; i <= 200; i += 1) process.stdout.write('line ' + i + ' ' + 'y'.repeat(30) + '\\n');" +
+      " process.exitCode = 5;";
+    expect(await runCli(["run", "--task", "read the output", "--", ...node(script)], io)).toBe(5);
+
+    let produced = `${PRIVATE_KEY}\n`;
+    for (let i = 1; i <= 200; i += 1) produced += `line ${String(i)} ${"y".repeat(30)}\n`;
+    const expected = Buffer.from(produced, "utf8");
+    const printed = io.outBytes();
+    expect(printed.subarray(0, expected.length)).toEqual(expected);
+    expect(printed.subarray(expected.length).toString("utf8")).toBe(
+      "jevprune: exit 5, 204 lines passed through (output over 1024 bytes, output looked like a credential, full output was not saved)\n",
+    );
+
+    expect(await runFiles()).toEqual([]);
+
+    const gain = await gainLines();
+    expect(gain).toHaveLength(1);
+    expect(gain[0]).toMatchObject({ mode: "passthrough", linesIn: 204, linesOut: 204 });
+    expect(JSON.stringify(gain[0])).not.toContain("PRIVATE KEY");
+  });
+
   it("prints the truncated capture when an oversize command fails and the run store is unavailable", async () => {
     await writeConfig(home, { fastPathLines: 0, maxPruneBytes: 1024, headLines: 2, tailLines: 2 });
     await writeFile(join(home, "runs"), "", "utf8");
@@ -342,6 +393,24 @@ describe("cli run", () => {
     const io = testIo(homeEnv(home));
     expect(await runCli(["run", "--", join(home, "missing-binary")], io)).toBe(127);
     expect(io.err()).toBe(`jevprune: command not found: ${join(home, "missing-binary")}\n`);
+  });
+
+  it("never archives a run whose output looks like a credential", async () => {
+    await writeConfig(home, { fastPathLines: 0 });
+    const io = testIo(homeEnv(home));
+    const script = `process.stdout.write(${JSON.stringify(PRIVATE_KEY)} + '\\n');`;
+    expect(await runCli(["run", "--task", "read the key", "--", ...node(script)], io)).toBe(0);
+
+    expect(io.out()).toBe(
+      `${PRIVATE_KEY}\njevprune: exit 0, 4 lines passed through (output looks like a credential, full output was not saved)\n`,
+    );
+    expect(io.err()).toBe("");
+    expect(await runFiles()).toEqual([]);
+
+    const gain = await gainLines();
+    expect(gain).toHaveLength(1);
+    expect(gain[0]).toMatchObject({ mode: "passthrough", linesIn: 4, linesOut: 4 });
+    expect(JSON.stringify(gain[0])).not.toContain("PRIVATE KEY");
   });
 
   it("falls back to the command as the task", async () => {
@@ -486,6 +555,25 @@ describe("cli select", () => {
       `alpha\nbeta\njevprune: fallback (Jev unavailable: API key not set), 2 → 2 lines, full output ${join(home, "runs", `${String(id)}.log`)}\n`,
     );
     expect(await readFile(join(home, "runs", `${String(id)}.log`), "utf8")).toBe("alpha\nbeta\n");
+  });
+
+  it("never archives a file whose contents look like a credential", async () => {
+    await writeConfig(home, { fastPathLines: 0 });
+    const path = join(home, "id_rsa");
+    await writeFile(path, `${PRIVATE_KEY}\n`, "utf8");
+    const io = testIo(homeEnv(home));
+    expect(await runCli(["select", "--task", "read it", "--file", path], io)).toBe(0);
+
+    expect(io.out()).toBe(
+      `${PRIVATE_KEY}\njevprune: 4 lines passed through (output looks like a credential, full output was not saved)\n`,
+    );
+    expect(io.err()).toBe("");
+    expect(await runFiles()).toEqual([]);
+
+    const gain = await gainLines();
+    expect(gain).toHaveLength(1);
+    expect(gain[0]).toMatchObject({ mode: "passthrough", linesIn: 4, linesOut: 4 });
+    expect(JSON.stringify(gain[0])).not.toContain("PRIVATE KEY");
   });
 
   it("falls back on the head and the tail when the file is over maxPruneBytes", async () => {

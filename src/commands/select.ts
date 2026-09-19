@@ -36,7 +36,7 @@ export async function runSelect(options: SelectOptions, io: CliIo): Promise<numb
   }
 
   const command = options.command ?? "";
-  const { task } = await resolveTask({
+  const { task } = resolveTask({
     ...(options.task !== undefined ? { flag: options.task } : {}),
     env: io.env,
     command,

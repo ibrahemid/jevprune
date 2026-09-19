@@ -34,7 +34,6 @@ export {
   RunNotFoundError,
   RunStoreError,
   SpawnError,
-  TranscriptError,
   UsageError,
 } from "./errors.js";
 export { FakeJevClient } from "./fake-jev.js";

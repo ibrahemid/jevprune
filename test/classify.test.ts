@@ -26,6 +26,65 @@ const GIT_DIFF_OUTPUT = [
 
 const YAML_FRONT_MATTER = "---\ntitle: jevprune\nversion: 0.2.0\n---\n\nA log pruner.\n";
 
+const MARKDOWN_DOCUMENT = [
+  "# jevprune",
+  "",
+  "Prunes long command output line by line.",
+  "",
+  "## Install",
+  "",
+  "- `npm i -g jevprune`",
+  "- set `TYPESAFE_API_KEY`",
+  "",
+  "## Commands",
+  "",
+  "1. `jevprune run -- pnpm test`",
+  "2. `jevprune show <id> --lines 120-531`",
+  "",
+  "```sh",
+  "jevprune gain",
+  "```",
+  "",
+  "## Limits",
+  "",
+  "- failed commands are never pruned",
+  "- output over the size limit falls back to rules",
+].join("\n");
+
+const HELP_OUTPUT = [
+  "Usage: jevprune [options] <command>",
+  "",
+  "Options:",
+  "  -t, --task <text>      the task the output is read for",
+  "  --threshold <number>   keep a line at or above this score",
+  "  --lines <from>-<to>    the range to read back",
+  "  -h, --help             print this help",
+  "  -V, --version          print the version",
+].join("\n");
+
+const SOURCE_LISTING = [
+  'import { readFile } from "node:fs/promises";',
+  "",
+  'import { loadConfig } from "./config.js";',
+  'import type { ResolvedConfig } from "./config.js";',
+  "",
+  "export interface ReaderInput {",
+  "  readonly path: string;",
+  "  readonly config: ResolvedConfig;",
+  "}",
+  "",
+  "export async function readSource(input: ReaderInput): Promise<string> {",
+  "  const config = await loadConfig(input.config);",
+  "  const text = await readFile(input.path, \"utf8\");",
+  "  if (text.length > config.maxPruneBytes) {",
+  "    return text.slice(0, config.maxPruneBytes);",
+  "  }",
+  "  return text;",
+  "}",
+].join("\n");
+
+const SEQ_OUTPUT = `${Array.from({ length: 300 }, (_, index) => String(index + 1)).join("\n")}\n`;
+
 function readFixture(name: string): string {
   return readFileSync(fileURLToPath(new URL(`fixtures/${name}`, import.meta.url)), "utf8");
 }
@@ -87,9 +146,29 @@ describe("isDocumentOutput", () => {
     expect(isDocumentOutput("jq . package.json", JQ_OUTPUT)).toBe(true);
   });
 
+  it("classifies a Markdown document by its headings and lists", () => {
+    expect(isDocumentOutput("sh ./render.sh", MARKDOWN_DOCUMENT)).toBe(true);
+  });
+
+  it("classifies a usage block with its options as a document", () => {
+    expect(isDocumentOutput("jevprune --help", HELP_OUTPUT)).toBe(true);
+  });
+
+  it("classifies a source listing as a document", () => {
+    expect(isDocumentOutput("sh ./print-source.sh", SOURCE_LISTING)).toBe(true);
+  });
+
   it("does not classify the build and test fixtures as documents", () => {
     for (const { file, command } of FIXTURE_RUNS) {
       expect(isDocumentOutput(command, readFixture(file))).toBe(false);
     }
+  });
+
+  it("does not classify a run of numbers as a document", () => {
+    expect(isDocumentOutput("seq 300", SEQ_OUTPUT)).toBe(false);
+  });
+
+  it("does not classify short output as a document", () => {
+    expect(isDocumentOutput("pnpm build", "# build\n# done\n")).toBe(false);
   });
 });

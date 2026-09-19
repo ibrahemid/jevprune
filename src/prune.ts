@@ -22,6 +22,7 @@ export interface PruneInput {
   readonly client?: JevClient | null;
   readonly config?: Partial<Config>;
   readonly save?: boolean;
+  readonly protect?: boolean;
   readonly env?: NodeJS.ProcessEnv;
 }
 
@@ -49,6 +50,7 @@ interface PruneContext {
   readonly store: RunStore | null;
   readonly runId: string;
   readonly command: string;
+  readonly protect: boolean;
 }
 
 interface SelectAndRecordInput {
@@ -153,12 +155,19 @@ export async function recordRun(input: RecordRunInput): Promise<RecordRunResult>
   const log = input.logBytes ?? (input.logText !== undefined ? Buffer.from(input.logText, "utf8") : undefined);
   let failureCode = input.storeFailureCode;
 
+  let strandedLog: string | undefined;
+  if (store !== null && !archive) {
+    const discardFailure = await discardArchived(store, meta.id);
+    if (discardFailure !== undefined) strandedLog = store.logPath(meta.id);
+    failureCode = discardFailure ?? failureCode;
+  }
+
   if (store !== null && failureCode === undefined) {
     try {
       if (keepLog) {
         if (log !== undefined) await writeLog(store, meta.id, log);
         await store.finalizeRun(meta.id, plan.meta);
-      } else if (!archive || log === undefined) {
+      } else if (log === undefined) {
         await store.discardRun(meta.id);
       }
       await store.appendGain(plan.gain);
@@ -169,7 +178,8 @@ export async function recordRun(input: RecordRunInput): Promise<RecordRunResult>
     }
   }
 
-  const logPath = store !== null && keepLog && failureCode === undefined ? store.logPath(meta.id) : undefined;
+  const logPath =
+    store !== null && keepLog && failureCode === undefined ? store.logPath(meta.id) : strandedLog;
   const footer = formatFooter({
     mode: selection.mode,
     linesIn: selection.linesIn,
@@ -181,6 +191,13 @@ export async function recordRun(input: RecordRunInput): Promise<RecordRunResult>
     ...(logPath !== undefined ? { logPath } : {}),
   });
   return { footer, ...(logPath !== undefined ? { logPath } : {}) };
+}
+
+export function shouldArchiveSelection(selection: SelectionResult): boolean {
+  const reason = selection.fallbackReason;
+  if (reason === undefined) return true;
+  if (reason.kind === "secret") return false;
+  return !(reason.kind === "size-limit" && reason.isSecret === true);
 }
 
 export function clientFromEnv(env: NodeJS.ProcessEnv): JevClient | null {
@@ -210,6 +227,7 @@ async function prepare(input: Omit<PruneInput, "text">): Promise<PruneContext> {
     store: input.save === false ? null : new RunStore({ home: config.home, retention: config.retention }),
     runId: newRunId(),
     command: input.command ?? "",
+    protect: input.protect !== false,
   };
 }
 
@@ -226,6 +244,7 @@ async function selectAndRecord(input: SelectAndRecordInput): Promise<PruneResult
     client: prepared.client,
     config: prepared.config,
     runId: prepared.runId,
+    protect: prepared.protect,
     bytes: capture.bytes,
     now: () => new Date().toISOString(),
   });
@@ -233,6 +252,7 @@ async function selectAndRecord(input: SelectAndRecordInput): Promise<PruneResult
   const recorded = await recordRun({
     store: prepared.store,
     selection,
+    archive: shouldArchiveSelection(selection),
     ...(input.logBytes !== undefined ? { logBytes: input.logBytes } : {}),
     ...(input.storeFailureCode !== undefined ? { storeFailureCode: input.storeFailureCode } : {}),
     meta: {
@@ -284,6 +304,16 @@ async function openLogSink(store: RunStore | null, id: string): Promise<LogSink>
     },
     failureCode: () => (writer.failure === undefined ? undefined : (writer.failure.code ?? "failed")),
   };
+}
+
+async function discardArchived(store: RunStore, id: string): Promise<string | undefined> {
+  try {
+    await store.discardRun(id);
+  } catch (error) {
+    if (!(error instanceof RunStoreError)) throw error;
+    return error.code ?? "failed";
+  }
+  return undefined;
 }
 
 async function discardPartialRun(store: RunStore | null, id: string): Promise<void> {
