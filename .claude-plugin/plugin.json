@@ -12,7 +12,7 @@
     "apiKey": {
       "type": "string",
       "title": "TypeSafe API key",
-      "description": "TypeSafe API key. Leave unset to use TYPESAFE_API_KEY.",
+      "description": "Leave unset to use the TYPESAFE_API_KEY environment variable.",
       "sensitive": true
     },
     "threshold": {
